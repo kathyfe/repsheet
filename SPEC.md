@@ -1,4 +1,4 @@
-# repsheet: spec v0.1
+# repsheet: spec v0.2
 
 Kathy's own workout tracker. Fast to log between sets, built for strength and functional training, and feeding her training data into a Google Sheet that her Health Coach (Kat OS) reads.
 
