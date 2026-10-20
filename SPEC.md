@@ -1,4 +1,4 @@
-# repsheet: spec v0.2
+# repsheet: spec v0.3
 
 Kathy's own workout tracker. Fast to log between sets, built for strength and functional training, and feeding her training data into a Google Sheet that her Health Coach (Kat OS) reads.
 
@@ -65,7 +65,28 @@ Status: draft for Kathy's review, 20 Oct 2026.
 
 ### History
 - Sessions list with duration and feel.
-- Per exercise: every set over time, best set, estimated 1RM trend for kg × reps moves.
+- Per exercise: every set over time and its best set.
+
+### PRs
+- Spotted automatically as she logs, per exercise:
+  - Heaviest weight, best estimated 1RM, and rep PRs (best weight for 1, 3, 5, 8 and 10 reps).
+  - Most reps at bodyweight, longest hold, fastest time or most rounds for circuits and benchmarks, heaviest carry over a set distance.
+- Cable and machine PRs count per gym and machine, like their history.
+- PR moments: a short on-screen celebration (silent) and a PR badge on the set. A PR board lists the current best for every exercise.
+
+### Graphs
+- Per exercise: estimated 1RM and top set over time, with tested maxes from PR sessions marked.
+- Weekly training: sessions per week against the plan, volume per movement pattern (squat, hinge, push, pull, carry, core).
+- Block view: start of block vs now for the main lifts.
+- Benchmark circuits: time or rounds each time she repeats one.
+
+### PR session
+- A special session type for testing, done every now and then. Natural slot: the end of a block, so the results set the next block's loads.
+- She picks what to test: a 1RM, 3RM or 5RM per lift, and optionally a benchmark circuit.
+- **Warm-up ramp** built from her last best, using the gym's real increments, e.g. 50% × 5, 70% × 3, 80% × 2, 90% × 1.
+- **Attempt planner:** opener, second and third, with longer rest between attempts. After each attempt she marks it made or missed, and the app suggests the next jump.
+- Reminder to set the safeties before heavy attempts.
+- Results are saved as tested maxes, feed the graphs, and go to the Health Coach for the next block's numbers.
 
 ### Sync and backup
 - Each finished session is saved on the phone first, then sent to the Google Sheet when online. Nothing is lost offline.
@@ -85,7 +106,7 @@ Status: draft for Kathy's review, 20 Oct 2026.
 - Body measurements, nutrition, social features.
 - The coach writing programmes straight into the app. For now the coach proposes changes in the Saturday review and Kathy applies them in the builder.
 
-Candidates for v1.1: plate calculator, warm-up set generator, progression hints from the rules on the Programme page in Kat OS, PR moments with a bit of fanfare.
+Candidates for v1.1: plate calculator, warm-up ramps for normal sessions, progression hints from the rules on the Programme page in Kat OS.
 
 ## 5. The Google Sheet
 
@@ -114,7 +135,9 @@ One Sheet, `repsheet log`, in Kat OS Files on Google Drive. Flat rows so the Hea
 | swapped_from | |
 | notes | grip went first |
 
-**Sessions** (one row per session): session_id, date, gym, workout, block name, week of block, start, end, duration_min, feel, circuit results, notes.
+**Sessions** (one row per session): session_id, date, gym, session_type (normal or PR session), workout, block name, week of block, start, end, duration_min, feel, circuit results, notes.
+
+**PRs** (one row per PR): date, session_id, gym, exercise, machine, PR type (1RM, 3RM, rep PR, estimated 1RM, time, rounds), value, previous best. Set types in **Sets** also include `attempt` (made or missed) for PR sessions.
 
 **Library**, **Workouts** and **Gyms**: backups, one row per exercise, workout or gym (workouts and gym equipment stored as JSON in a cell).
 
@@ -130,6 +153,7 @@ Sending a session again replaces its rows (matched on session_id), so retries ne
 ## 7. How the Health Coach uses it
 
 - Reads the Sheet (read only) for the Saturday 10:00 review: sessions done, top sets, PRs, stalls.
+- Suggests a PR session near the end of each block, and uses the tested maxes to set the next block's loads.
 - Proposes next week's loads using simple written progression rules, so any model makes the same call.
 - Exercise swaps only at block end, unless Kathy asks.
 - Writes the summary to Kat OS (Notion), plus two lines for Jarvis's Sunday review.
@@ -138,7 +162,7 @@ Sending a session again replaces its rows (matched on session_id), so retries ne
 
 1. **Spec agreed.** This document.
 2. **Clickable prototype:** Today, Workout in progress and the circuit timers, with dummy data. Kathy tries it in the gym.
-3. **MVP:** storage, builder, library, history, installable, Sheet sync.
+3. **MVP:** storage, builder, library, gyms, history, PRs, graphs, PR session, installable, Sheet sync.
 4. **Lyfta import and coach hook-up:** history in, Health Coach's weekly review skill reads the Sheet.
 5. **First functional block** built in the app and running.
 
