@@ -146,7 +146,9 @@ Sending a session again replaces its rows (matched on session_id), so retries ne
 ## 6. How it's built
 
 - **Progressive web app** hosted on GitHub Pages from this repo, at `/app/`. Installs to the home screen from Chrome, works offline, no app store.
-- TypeScript, a small UI library, IndexedDB for storage on the phone.
+- Plain JavaScript modules with no build step, so GitHub Pages serves the repo as it is and any model can read and edit the code. IndexedDB for storage on the phone in the MVP (the prototype uses local storage).
+- Two typefaces bundled with the app for offline use: Big Shoulders Display for numbers and headings, Archivo for text (both SIL Open Font Licence).
+- A service worker caches every file, so the app opens instantly without signal. Bump its version on every deploy.
 - **Sync:** a small Google Apps Script attached to the Sheet receives finished sessions. Its URL and a secret key are entered once in the app's settings on Kathy's phone. They never go in this repo, which is public.
 - No personal data in the repo, ever. Code only.
 
@@ -161,7 +163,7 @@ Sending a session again replaces its rows (matched on session_id), so retries ne
 ## 8. Milestones
 
 1. **Spec agreed.** This document.
-2. **Clickable prototype:** Today, Workout in progress and the circuit timers, with dummy data. Kathy tries it in the gym.
+2. **Clickable prototype:** Today, Workout in progress, circuit timers, PR moments, PR board, graphs and PR session, with sample data. Live at https://kathyfe.github.io/repsheet/app/ (prototype 0.1, 20 Oct 2026). Kathy tries it in the gym.
 3. **MVP:** storage, builder, library, gyms, history, PRs, graphs, PR session, installable, Sheet sync.
 4. **Lyfta import and coach hook-up:** history in, Health Coach's weekly review skill reads the Sheet.
 5. **First functional block** built in the app and running.
