@@ -1,4 +1,4 @@
-# repsheet: spec v0.3
+# repsheet: spec v0.4
 
 Kathy's own workout tracker. Fast to log between sets, built for strength and functional training, and feeding her training data into a Google Sheet that her Health Coach (Kat OS) reads.
 
@@ -100,6 +100,16 @@ Status: draft for Kathy's review, 20 Oct 2026.
 - Imported history goes under a "Lyfta history" gym, so old cable numbers don't prefill at today's gyms.
 - Kathy's export (checked 20 Oct 2026): 10 sessions from March to July 2026, 182 sets, 33 exercises. The file itself never goes in this repo.
 
+### Changes from Kathy's first look (prototype 0.2, 20 Oct 2026)
+- **Plate visual removed.** It was confusing.
+- **Per-set options:** tap a set number to set its tempo (or none), add reps to failure after the tempo reps (e.g. 5 on 3-0-3-0, then 2 to failure), change the set type, or remove the set. Tempo and failure reps can be copied to the remaining sets. Reps to failure count towards PRs and volume.
+- **Exercise library** by muscle group: Quads, Hamstrings, Glutes, Back, Chest, Shoulders, Arms, Core, Full body, Conditioning, Mobility, Other. Add and edit exercises with equipment, what you log (weight and reps, reps, time, weight and distance, distance, calories) and each-side. Swaps suggest the same muscle group first.
+- **Gyms:** add and edit gyms. Smallest barbell plate, dumbbell and kettlebell sets, and named machine or cable stations with their stack written as a range (5-100/5) or a list (6.5, 12.5, 38.3). Each station lists the exercises that use it. During a workout, a machine or cable exercise with no station at that gym asks which station to use, or lets her add one on the spot.
+- **Workout editor:** change sets, reps, time, rest, warm-up sets and tempo; swap or add exercises; pair exercises into supersets; add and edit circuits; reorder and remove blocks. Save for every week, use for today only, or save as a new workout (variants like Back A and Back B). New workouts and deleting workouts too.
+- **Changes mid-workout:** add sets, drop sets, rounds and exercises while training. At the end, a toggle keeps today's changes for next time; off by default so the plan stays consistent.
+- **PR session:** can be discarded while running or after finishing.
+- **Sessions per week:** now a row of squares per week (one per planned session, filled when trained) instead of a bar chart.
+
 ## 4. Not in the MVP
 
 - Watch app, heart rate, Google Health sync (Google's API isn't open to new projects yet).
@@ -163,7 +173,7 @@ Sending a session again replaces its rows (matched on session_id), so retries ne
 ## 8. Milestones
 
 1. **Spec agreed.** This document.
-2. **Clickable prototype:** Today, Workout in progress, circuit timers, PR moments, PR board, graphs and PR session, with sample data. Live at https://kathyfe.github.io/repsheet/app/ (prototype 0.1, 20 Oct 2026). Kathy tries it in the gym.
+2. **Clickable prototype:** Today, Workout in progress, circuit timers, PR moments, PR board, graphs and PR session, with sample data. Live at https://kathyfe.github.io/repsheet/app/ (prototype 0.2, 20 Oct 2026). Kathy tries it in the gym.
 3. **MVP:** storage, builder, library, gyms, history, PRs, graphs, PR session, installable, Sheet sync.
 4. **Lyfta import and coach hook-up:** history in, Health Coach's weekly review skill reads the Sheet.
 5. **First functional block** built in the app and running.

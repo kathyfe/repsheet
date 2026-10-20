@@ -1,25 +1,52 @@
-// Pure helpers: increments, plates, estimated maxes, progression, PR session plans.
+// Pure helpers: increments, stacks, estimated maxes, progression, PR session plans, formatting.
 
 export const BAR = 20;
-const PLATES = [25, 20, 15, 10, 5, 2.5, 1.25];
 
 const r2 = (v) => Math.round(v * 100) / 100;
 
 export function range(a, b, step) {
   const out = [];
-  for (let v = a; v <= b + 1e-9; v = r2(v + step)) out.push(r2(v));
+  if (!(step > 0)) return out;
+  for (let v = a; v <= b + 1e-9 && out.length < 500; v = r2(v + step)) out.push(r2(v));
   return out;
 }
 
-export const DUMBBELLS = [...range(1, 10, 1), ...range(12, 50, 2)];
+// "5-100/5, 102.5" or "6.5 12.5 38.3" -> sorted list of weights. Dots for decimals.
+export function parseValues(spec) {
+  const out = [];
+  for (const raw of String(spec || '').split(/[,;\n]+/)) {
+    const t = raw.trim();
+    if (!t) continue;
+    const m = t.match(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+    if (m) { out.push(...range(Number(m[1]), Number(m[2]), Number(m[3]))); continue; }
+    for (const part of t.split(/\s+/)) {
+      const n = Number(part);
+      if (Number.isFinite(n) && n >= 0) out.push(r2(n));
+    }
+  }
+  return [...new Set(out)].sort((a, b) => a - b);
+}
+
+export function previewValues(vals) {
+  if (!vals.length) return 'No weights yet';
+  if (vals.length <= 7) return `${vals.join(', ')} kg`;
+  return `${vals.length} weights from ${vals[0]} to ${vals[vals.length - 1]} kg`;
+}
 
 // How a weight can move for this exercise at this gym.
-export function stepsFor(ex, gym) {
+export function stepsFor(ex, gym, exId) {
+  if (!ex || !gym) return null;
   switch (ex.equip) {
-    case 'barbell': return { kind: 'step', step: 2.5, min: BAR };
-    case 'dumbbell': return { kind: 'list', values: DUMBBELLS };
-    case 'kettlebell': return { kind: 'list', values: gym.kettlebells };
-    case 'machine': return { kind: 'list', values: gym.machines[ex.machine].values };
+    case 'barbell': return { kind: 'step', step: r2((gym.plate || 1.25) * 2), min: BAR };
+    case 'dumbbell': return { kind: 'list', values: parseValues(gym.dumbbells || '1-10/1, 12-50/2') };
+    case 'kettlebell': return { kind: 'list', values: parseValues(gym.kettlebells || '8, 12, 16, 20, 24') };
+    case 'machine':
+    case 'cable': {
+      const st = (gym.stations || []).find((s) => s.id === gym.use?.[exId]);
+      const vals = st ? parseValues(st.stack) : [];
+      return vals.length ? { kind: 'list', values: vals, station: st } : { kind: 'step', step: 2.5, min: 0, unset: true };
+    }
+    case 'other': return { kind: 'step', step: 1, min: 0 };
     default: return null;
   }
 }
@@ -63,8 +90,8 @@ export function nextTarget(last, reps, steps) {
   const work = (last || []).filter((s) => s.kg != null);
   if (!work.length) return null;
   const top = Math.max(...work.map((s) => s.kg));
-  const hitAll = reps ? work.every((s) => (s.reps ?? 0) >= reps) : false;
-  if (hitAll && steps) {
+  const hitAll = reps ? work.every((s) => (s.reps ?? 0) + (s.extra ?? 0) >= reps) : false;
+  if (hitAll && steps && !steps.unset) {
     const n = nudge(top, 1, steps);
     return { kg: n, bumped: n > top };
   }
@@ -87,14 +114,17 @@ export function testPlan(best, reps, steps) {
   return { est: Math.round(est * 10) / 10, prev: best?.repMax?.[reps] ?? null, ramp, attempts };
 }
 
-export function platesPerSide(kg, bar = BAR) {
-  if (kg == null || kg <= bar) return [];
-  let left = r2((kg - bar) / 2);
-  const out = [];
-  for (const p of PLATES) {
-    while (left >= p - 1e-9) { out.push(p); left = r2(left - p); }
+// Rough session length in minutes, rounded to 5.
+export function estimateMinutes(blocks) {
+  let sec = 0;
+  for (const b of blocks || []) {
+    if (b.type === 'straight') { const it = b.items[0]; sec += (it.sets || 3) * ((it.rest || 90) + 45) + (it.warmups || 0) * 75; }
+    else if (b.type === 'superset') sec += (b.rounds || 3) * ((b.items.length * 45) + (b.rest || 90));
+    else if (b.type === 'emom' || b.type === 'amrap') sec += (b.minutes || 10) * 60;
+    else if (b.type === 'fortime') sec += (b.cap || 12) * 50;
+    else if (b.type === 'rounds') sec += (b.rounds || 3) * ((b.items.length * 40) + (b.rest || 60));
   }
-  return left > 0.01 ? null : out;
+  return Math.max(5, Math.round(sec / 300) * 5);
 }
 
 export function fmtKg(v) {
@@ -111,4 +141,8 @@ export function fmtTime(sec) {
 export function fmtRest(sec) {
   if (sec < 60) return `${sec} s`;
   return sec % 60 ? fmtTime(sec) : `${sec / 60} min`;
+}
+
+export function slug(s) {
+  return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'item';
 }

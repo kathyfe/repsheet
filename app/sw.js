@@ -1,5 +1,5 @@
 // Offline support. Bump VERSION on every deploy so phones pick up the new files.
-const VERSION = 'repsheet-0.1.0';
+const VERSION = 'repsheet-0.2.0';
 const FILES = [
   './', './index.html', './styles.css', './app.js', './data.js', './logic.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png',
