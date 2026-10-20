@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Shopping list</title>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Recipe",
+  "name": "Shopping list: test week",
+  "description": "Weekly shopping list from Kat OS Health Coach. Totals only, metric, rounded up to buyable amounts.",
+  "recipeYield": "1 week",
+  "recipeIngredient": [
+    "500 g chicken breast",
+    "250 g red lentils",
+    "400 ml light coconut milk",
+    "1 jar green curry paste",
+    "500 g spaghetti",
+    "700 g passata",
+    "500 g jasmine rice",
+    "2 onions",
+    "1 garlic bulb",
+    "3 carrots",
+    "2 red capsicums",
+    "1 broccoli",
+    "1 bunch coriander",
+    "2 limes",
+    "1 kg skyr",
+    "5 bananas",
+    "500 g frozen berries"
+  ],
+  "recipeInstructions": [
+    {"@type": "HowToStep", "text": "Untick anything you already have, then add the rest to your Bring! list."}
+  ]
+}
+</script>
+<style>
+  :root { --bg: #fafaf7; --fg: #1d1d1b; --muted: #6b6b66; --line: #e4e3dc; --accent: #2f6f4f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --fg: #ecebe6; --muted: #9a9993; --line: #2c2c2a; --accent: #7cc39c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 34rem; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; font-size: 0.9rem; }
+  h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); margin: 24px 0 8px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .qty { color: var(--muted); white-space: nowrap; }
+  .meals li { display: block; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Shopping list</h1>
+  <p class="sub">Test week. Share this page to Bring! and untick what you already have.</p>
+
+  <h2>Fruit &amp; veg</h2>
+  <ul>
+    <li><span>Onions</span><span class="qty">2</span></li>
+    <li><span>Garlic</span><span class="qty">1 bulb</span></li>
+    <li><span>Carrots</span><span class="qty">3</span></li>
+    <li><span>Red capsicums</span><span class="qty">2</span></li>
+    <li><span>Broccoli</span><span class="qty">1</span></li>
+    <li><span>Coriander</span><span class="qty">1 bunch</span></li>
+    <li><span>Limes</span><span class="qty">2</span></li>
+    <li><span>Bananas</span><span class="qty">5</span></li>
+  </ul>
+
+  <h2>Meat</h2>
+  <ul>
+    <li><span>Chicken breast</span><span class="qty">500 g</span></li>
+  </ul>
+
+  <h2>Dairy</h2>
+  <ul>
+    <li><span>Skyr</span><span class="qty">1 kg</span></li>
+  </ul>
+
+  <h2>Pantry</h2>
+  <ul>
+    <li><span>Red lentils</span><span class="qty">250 g</span></li>
+    <li><span>Light coconut milk</span><span class="qty">400 ml</span></li>
+    <li><span>Green curry paste</span><span class="qty">1 jar</span></li>
+    <li><span>Spaghetti</span><span class="qty">500 g</span></li>
+    <li><span>Passata</span><span class="qty">700 g</span></li>
+    <li><span>Jasmine rice</span><span class="qty">500 g</span></li>
+  </ul>
+
+  <h2>Frozen</h2>
+  <ul>
+    <li><span>Berries</span><span class="qty">500 g</span></li>
+  </ul>
+
+  <h2>This week's meals</h2>
+  <ul class="meals">
+    <li>Thai green chicken curry with rice</li>
+    <li>Lentil bolognese</li>
+    <li>Skyr breakfasts</li>
+  </ul>
+</main>
+</body>
+</html>
