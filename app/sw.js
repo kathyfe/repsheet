@@ -1,5 +1,5 @@
 // Offline support. Bump VERSION on every deploy so phones pick up the new files.
-const VERSION = 'repsheet-0.2.0';
+const VERSION = 'repsheet-0.3.0';
 const FILES = [
   './', './index.html', './styles.css', './app.js', './data.js', './logic.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png',
@@ -7,7 +7,7 @@ const FILES = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {

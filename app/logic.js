@@ -122,7 +122,7 @@ export function estimateMinutes(blocks) {
     else if (b.type === 'superset') sec += (b.rounds || 3) * ((b.items.length * 45) + (b.rest || 90));
     else if (b.type === 'emom' || b.type === 'amrap') sec += (b.minutes || 10) * 60;
     else if (b.type === 'fortime') sec += (b.cap || 12) * 50;
-    else if (b.type === 'rounds') sec += (b.rounds || 3) * ((b.items.length * 40) + (b.rest || 60));
+    else if (b.type === 'rounds') sec += (b.rounds || 3) * ((b.items.length * 40) + (b.rest ?? 60));
   }
   return Math.max(5, Math.round(sec / 300) * 5);
 }

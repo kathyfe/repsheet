@@ -110,6 +110,14 @@ Status: draft for Kathy's review, 20 Oct 2026.
 - **PR session:** can be discarded while running or after finishing.
 - **Sessions per week:** now a row of squares per week (one per planned session, filled when trained) instead of a bar chart.
 
+### Prototype 0.3 (6 Nov 2026)
+- **Programme files.** Real routines stay out of this public repo. They reach the phone in a private JSON file, loaded with "Back up or load a file" on Today. The file holds `app: "repsheet"`, `kind: "programme"`, `exercises` (new or changed library entries), `workouts`, `order` (the rotation) and `start` (starting weight per exercise id). It replaces the sample routines, keeps gyms and any workouts she built herself, and can clear old test sessions.
+- **Backups.** The same button downloads everything on the phone as one file (`kind: "backup"`), and loading that file restores it.
+- **Real numbers.** Once a programme is loaded, sample history, PRs, graphs and weeks are hidden. Bests and graph points are saved per session.
+- **Starting weights** prefill the first session, then "last time" takes over.
+- **Drop sets** can be planned on the last set (`dropLast`, a toggle in the workout editor). The drop is about a third.
+- **Circuits** can have a name (`title`, e.g. Warm-up), and rest between rounds can be zero.
+
 ## 4. Not in the MVP
 
 - Watch app, heart rate, Google Health sync (Google's API isn't open to new projects yet).
@@ -173,7 +181,7 @@ Sending a session again replaces its rows (matched on session_id), so retries ne
 ## 8. Milestones
 
 1. **Spec agreed.** This document.
-2. **Clickable prototype:** Today, Workout in progress, circuit timers, PR moments, PR board, graphs and PR session, with sample data. Live at https://kathyfe.github.io/repsheet/app/ (prototype 0.2, 20 Oct 2026). Kathy tries it in the gym.
+2. **Clickable prototype:** Today, Workout in progress, circuit timers, PR moments, PR board, graphs and PR session, with sample data. Live at https://kathyfe.github.io/repsheet/app/ (prototype 0.3, 6 Nov 2026). Kathy tries it in the gym.
 3. **MVP:** storage, builder, library, gyms, history, PRs, graphs, PR session, installable, Sheet sync.
 4. **Lyfta import and coach hook-up:** history in, Health Coach's weekly review skill reads the Sheet.
 5. **First functional block** built in the app and running.
