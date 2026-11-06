@@ -23,14 +23,15 @@ export function sessionMessage(s, h) {
         sets.push([
           date, id, s.name, gym, `${h.letter(bi)}${b.type === 'superset' ? ' (superset)' : ''}`, h.exName(it.exId), h.machine(it.exId, s.gymId),
           i + 1, x.type, x.kg ?? '', x.reps ?? '', x.time ?? '', x.dist ?? '', x.cal ?? '', x.tempo ?? '', '',
-          it.from ? h.exName(it.from) : '', x.extra ? `then ${x.extra} to failure` : '',
+          it.from ? h.exName(it.from) : '', [x.extra ? `then ${x.extra} to failure` : '', (x.note || '').trim()].filter(Boolean).join('. '),
         ]);
       });
     }
   });
   const circuits = s.blocks.filter((b) => b.c && (b.c.status === 'done' || b.c.rounds > 0)).map(h.circuitLine).join('; ');
+  const notes = s.blocks.flatMap((b) => (b.items || []).filter((it) => (it.note || '').trim()).map((it) => `${h.exName(it.exId)}: ${it.note.trim()}`)).join('; ');
   const end = s.endedAt || Date.now();
-  const session = [id, date, gym, 'normal', s.name, '', '', clock(s.startedAt), clock(end), Math.round((end - s.startedAt) / 60000), s.feel ?? '', circuits, ''];
+  const session = [id, date, gym, 'normal', s.name, '', '', clock(s.startedAt), clock(end), Math.round((end - s.startedAt) / 60000), s.feel ?? '', circuits, notes];
   const prs = s.prs.flatMap((p) => p.hits.map((hit) => [date, id, gym, p.name, h.machine(p.exId, s.gymId), hit.label, hit.value, hit.prev ?? '']));
   return { id, session, sets, prs };
 }

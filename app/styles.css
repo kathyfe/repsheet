@@ -198,11 +198,22 @@ button:disabled { cursor: default; }
 .set-label i { display: block; width: 14px; height: 3px; border-radius: 2px; background: radial-gradient(circle, var(--dust) 1.2px, transparent 1.4px) 0 0 / 5px 3px repeat-x; }
 .set-label:active { background: var(--mat-2); }
 .set-label.static { display: grid; place-items: center; }
-.set-meta {
-  grid-column: 2 / 4; justify-self: start;
-  margin-top: 4px; padding: 3px 10px; border-radius: 12px;
-  background: var(--mat); color: var(--yellow); font-size: 13px; font-weight: 600;
+.set-meta { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.bubble {
+  min-height: 32px; padding: 4px 12px; border-radius: 16px;
+  background: var(--mat); color: var(--yellow); font-size: 14px; font-weight: 600;
+  box-shadow: inset 0 0 0 1.5px var(--line);
 }
+.bubble:active { background: var(--mat-2); }
+.set-note, .ex-note {
+  display: block; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere;
+  padding: 7px 10px; border-radius: 8px; border-left: 3px solid var(--yellow);
+  background: var(--mat); color: var(--chalk); font-size: 14px; line-height: 1.35;
+}
+.set-note { grid-column: 2 / 4; margin-top: 6px; }
+.ex-note { margin: 8px 0 4px 50px; width: calc(100% - 50px); }
+.ss-item .ex-note { margin: 6px 0 0; width: 100%; }
+.note-add { margin-top: 6px; }
 .set.warmup .set-label, .set.drop .set-label { color: var(--dust); }
 .fields { display: grid; grid-template-columns: repeat(var(--n, 2), minmax(0, 1fr)); gap: 8px; }
 .field {
@@ -261,6 +272,10 @@ button:disabled { cursor: default; }
 .stats dd { margin: 2px 0 0; font: 800 34px/1 var(--num); }
 .stats dd small { font: 600 14px var(--text); color: var(--dust); }
 .stats dd.pr { color: var(--red); }
+.stats .tap { cursor: pointer; }
+.stats .tap:active { background: var(--mat); }
+.stats .edit { color: var(--yellow); font-weight: 600; margin-left: 4px; text-decoration: underline; text-underline-offset: 2px; }
+.hint.long { margin-top: 10px; color: var(--yellow); }
 .pr-list, .circ-list { list-style: none; padding: 0; margin: 0; }
 .pr-list li, .circ-list li { padding: 10px 0; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
 .pr-list li span { color: var(--dust); font-size: 14px; width: 100%; }
@@ -443,6 +458,12 @@ button.machine.warn { color: var(--chalk); background: var(--mat); border-left: 
   background: var(--mat); color: var(--chalk); font: 400 16px var(--text);
 }
 .fld input:focus, .search input:focus, .move-edit input:focus { outline: none; border-color: var(--yellow); }
+.fld textarea {
+  width: 100%; min-height: 96px; padding: 10px 12px; resize: vertical;
+  border: 1.5px solid var(--line); border-radius: 10px;
+  background: var(--mat); color: var(--chalk); font: 400 16px/1.4 var(--text);
+}
+.fld textarea:focus { outline: none; border-color: var(--yellow); }
 .fld.big input { font: 800 30px var(--num); min-height: 56px; }
 .fld.inline { margin-top: 10px; }
 .lbl { font-size: 13px; color: var(--dust); font-weight: 600; margin: 18px 0 6px; }

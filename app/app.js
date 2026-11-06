@@ -4,7 +4,7 @@ import {
 import * as L from './logic.js';
 import * as Sync from './sync.js';
 
-const VERSION = 'prototype 0.4';
+const VERSION = 'prototype 0.5';
 
 // ---------- small helpers ----------
 const $ = (sel) => document.querySelector(sel);
@@ -387,16 +387,23 @@ function setRow(bi, ii, si, s, item, label) {
   if (t === 'time') f.push(field('time', s.time, 'numeric', `sec${side}`, 'seconds', s.done));
   if (t === 'kgDistance' || t === 'distance') f.push(field('dist', s.dist, 'numeric', `metres${side}`, 'metres', s.done));
   if (t === 'calories') f.push(field('cal', s.cal, 'numeric', 'cal', 'calories', s.done));
-  const meta = [];
-  if (s.tempo) meta.push(`Tempo ${esc(s.tempo)}`);
-  if (s.extra) meta.push(`then ${s.extra} to failure`);
-  if (s.type === 'failure') meta.push('To failure');
+  const bubbles = [];
+  if (s.tempo) bubbles.push(`<button class="bubble" data-act="setopts" data-focus="tempo" aria-label="Change tempo">Tempo ${esc(s.tempo)}</button>`);
+  if (s.extra) bubbles.push(`<button class="bubble" data-act="setopts" data-focus="extra" aria-label="Change reps to failure">+${s.extra} to failure</button>`);
+  if (s.type === 'failure') bubbles.push('<button class="bubble" data-act="setopts">To failure</button>');
+  const note = (s.note || '').trim();
   return `<div class="set ${s.type} ${s.done ? 'done' : ''}" data-b="${bi}" data-i="${ii}" data-s="${si}">
     <button class="set-label" data-act="setopts" aria-label="Options for set ${label}">${label}<i aria-hidden="true"></i></button>
     <div class="fields" style="--n:${f.length}">${f.join('')}</div>
     <button class="tick" data-act="tick" aria-pressed="${s.done}" aria-label="${s.done ? 'Undo this set' : 'Log this set'}">${CHECK}</button>
-    ${meta.length ? `<button class="set-meta" data-act="setopts">${meta.join(', ')}</button>` : ''}
+    ${bubbles.length ? `<div class="set-meta">${bubbles.join('')}</div>` : ''}
+    ${note ? `<button class="set-note" data-act="setopts" data-focus="note" aria-label="Change note">${esc(note)}</button>` : ''}
   </div>`;
+}
+
+function exNote(it, bi, ii) {
+  const note = (it.note || '').trim();
+  return note ? `<button class="ex-note" data-act="exnote" data-b="${bi}" data-i="${ii}" aria-label="Change note">${esc(note)}</button>` : '';
 }
 
 function stationLine(it, bi, ii, gymId) {
@@ -477,10 +484,12 @@ function straightBlock(b, bi) {
       ${!anyDone ? `<button class="chip small" data-act="swap" data-b="${bi}" data-i="0">Swap</button>` : ''}
     </header>
     ${lastLine(it, state.session.gymId)}
+    ${exNote(it, bi, 0)}
     <div class="sets">${rows}</div>
     <div class="add-row">
       <button class="chip small" data-act="add-set" data-b="${bi}">+ Set</button>
       ${ex.track === 'kgReps' ? `<button class="chip small" data-act="drop" data-b="${bi}">+ Drop set</button>` : ''}
+      ${(it.note || '').trim() ? '' : `<button class="chip small" data-act="exnote" data-b="${bi}" data-i="0">+ Note</button>`}
     </div>
   </section>`;
 }
@@ -492,7 +501,7 @@ function supersetBlock(b, bi) {
     const anyDone = it.sets.some((s) => s.done);
     return `<div class="ss-item">
       <span class="tag">${tagBase}${ii + 1}</span>
-      <div class="bh-text"><h3>${esc(ex.name)}</h3><p class="rx">${doseOf(it.rx, ex, b.rounds)}${it.rx.tempo ? `, tempo ${esc(it.rx.tempo)}` : ''}</p>${stationLine(it, bi, ii, state.session.gymId)}${lastLine(it, state.session.gymId)}</div>
+      <div class="bh-text"><h3>${esc(ex.name)}</h3><p class="rx">${doseOf(it.rx, ex, b.rounds)}${it.rx.tempo ? `, tempo ${esc(it.rx.tempo)}` : ''}</p>${stationLine(it, bi, ii, state.session.gymId)}${lastLine(it, state.session.gymId)}${exNote(it, bi, ii) || `<button class="chip small note-add" data-act="exnote" data-b="${bi}" data-i="${ii}">+ Note</button>`}</div>
       ${!anyDone ? `<button class="chip small" data-act="swap" data-b="${bi}" data-i="${ii}">Swap</button>` : ''}
     </div>`;
   }).join('');
@@ -596,7 +605,7 @@ function workoutScreen() {
     <div><h1>${esc(s.name)}</h1><p class="sub">${esc(gymById(s.gymId).name)}, <span data-elapsed>0:00</span></p></div>
     <button class="ghost" data-act="finish">Finish</button>
   </header>
-  <p class="tip">Tap a set number to change its tempo, add reps to failure or remove it.</p>
+  <p class="tip">Tap a set number to add a tempo, reps to failure or a note, or to remove the set.</p>
   ${blocks}
   <div class="add-row center"><button class="ghost" data-act="add-ex">+ Add an exercise</button></div>
   <div class="end">
@@ -632,11 +641,12 @@ function summaryScreen() {
   return `
   <header class="wtop"><div><h1>${esc(s.name)} done</h1><p class="sub">${esc(gymById(s.gymId).name)}</p></div></header>
   <dl class="stats">
-    <div><dt>Time</dt><dd>${L.fmtTime(dur / 1000)}</dd></div>
+    <div class="tap" data-act="dur" role="button" tabindex="0" aria-label="Change workout time"><dt>Time <span class="edit">Edit</span></dt><dd>${L.fmtTime(dur / 1000)}</dd></div>
     <div><dt>Sets</dt><dd>${st.sets}</dd></div>
     <div><dt>Volume</dt><dd>${st.volume.toLocaleString('en-AU')}<small> kg</small></dd></div>
     <div><dt>PRs</dt><dd class="${s.prs.length ? 'pr' : ''}">${s.prs.length}</dd></div>
   </dl>
+  ${dur > 3 * 3600000 ? '<p class="hint long">That\'s a long one. If you forgot to finish, tap Time to fix it.</p>' : ''}
   ${prs ? `<h2 class="sec">New PRs</h2><ul class="pr-list">${prs}</ul>` : ''}
   ${circuits ? `<h2 class="sec">Circuits</h2><ul class="circ-list">${circuits}</ul>` : ''}
   <h2 class="sec">How did it feel?</h2>
@@ -1143,31 +1153,77 @@ function pickListHtml(sh) {
   return html || '<p class="hint">No match. Add it as a new exercise below.</p>';
 }
 
+const DEFAULT_TEMPOS = ['3-0-3-0', '3-1-1-0', '2-0-2-0', '4-0-1-0', '3-0-1-0'];
+
+// Her five most used tempos, topped up with common ones until she has five of her own.
+function topTempos() {
+  const used = store.get('tempos', {});
+  const ranked = Object.keys(used).sort((a, b) => used[b] - used[a]);
+  return [...new Set([...ranked, ...DEFAULT_TEMPOS])].slice(0, 5);
+}
+
+const sheetSet = () => { const sh = state.sheet; return state.session.blocks[sh.b].items[sh.i].sets[sh.s]; };
+
 function setSheet(sh) {
   const b = state.session.blocks[sh.b];
   const it = b.items[sh.i];
   const set = it.sets[sh.s];
   if (!set) return '';
   const ex = exOf(it.exId);
-  const presets = ['3-0-3-0', '3-1-1-0', '2-0-2-0', '4-0-1-0', '3-0-1-0'];
-  if (it.rx.tempo && !presets.includes(it.rx.tempo)) presets.unshift(it.rx.tempo);
+  const f = sh.focus;
+  const show = (k) => !f || f === k;
+  const presets = topTempos();
   const custom = set.tempo && !presets.includes(set.tempo) ? set.tempo : '';
   const isSs = b.type === 'superset';
-  const canRemove = !set.done && (isSs ? b.rounds > 1 : it.sets.length > 1);
+  const canRemove = !f && !set.done && (isSs ? b.rounds > 1 : it.sets.length > 1);
+  const hasExtra = ex.track === 'kgReps' || ex.track === 'reps';
   const types = { warmup: 'Warm-up', working: 'Working', drop: 'Drop', failure: 'To failure' };
-  return `<h2>${isSs ? `Round ${sh.s + 1}` : 'Set options'}</h2>
-    <p class="hint">${esc(ex.name)}</p>
-    <p class="lbl">Tempo</p>
+  const titles = { tempo: 'Tempo', extra: 'Reps to failure', note: 'Note' };
+  const what = f === 'tempo' ? 'tempo' : f === 'extra' ? 'extra' : f ? null : 'both';
+  const copy = { tempo: 'Copy this tempo to every set', extra: 'Copy to every set', both: hasExtra ? 'Copy tempo and failure reps to every set' : 'Copy tempo to every set' };
+  const out = [`<h2>${f ? titles[f] : isSs ? `Round ${sh.s + 1}` : 'Set options'}</h2>`, `<p class="hint">${esc(ex.name)}</p>`];
+  if (show('tempo')) {
+    out.push(`<p class="lbl">Tempo</p>
     <div class="chips"><button class="chip ${!set.tempo ? 'on' : ''}" data-act="so-tempo" data-v="">No tempo</button>${presets.map((p) => `<button class="chip ${set.tempo === p ? 'on' : ''}" aria-pressed="${set.tempo === p}" data-act="so-tempo" data-v="${esc(p)}">${esc(p)}</button>`).join('')}</div>
-    <label class="fld"><span>Or type your own</span><input type="text" value="${esc(custom)}" data-act="so-tempo-in" placeholder="e.g. 4-1-2-0" maxlength="9" autocomplete="off"></label>
-    ${ex.track === 'kgReps' || ex.track === 'reps' ? `<p class="lbl">Then reps to failure</p>
+    <label class="fld"><span>Or type your own</span><input type="text" value="${esc(custom)}" data-act="so-tempo-in" placeholder="e.g. 4-1-2-0" maxlength="9" autocomplete="off"></label>`);
+  }
+  if (show('extra') && hasExtra) {
+    out.push(`<p class="lbl">Then reps to failure</p>
     <p class="hint">Say 5 reps on tempo, then 2 more to failure: log 5 reps on the set and 2 here.</p>
-    <div class="field mid"><button class="step" data-act="so-extra" data-d="-1" aria-label="Fewer reps to failure">−</button><span class="val"><b>${set.extra || 0}</b><small>reps to failure</small></span><button class="step" data-act="so-extra" data-d="1" aria-label="More reps to failure">+</button></div>` : ''}
-    <p class="lbl">Set type</p>
-    <div class="chips">${Object.entries(types).map(([k, v]) => `<button class="chip ${set.type === k ? 'on' : ''}" aria-pressed="${set.type === k}" data-act="so-type" data-v="${k}">${v}</button>`).join('')}</div>
-    <button class="ghost wide" data-act="so-later">Copy tempo and failure reps to the remaining sets</button>
+    <div class="field mid"><button class="step" data-act="so-extra" data-d="-1" aria-label="Fewer reps to failure">−</button><span class="val"><b>${set.extra || 0}</b><small>reps to failure</small></span><button class="step" data-act="so-extra" data-d="1" aria-label="More reps to failure">+</button></div>`);
+  }
+  if (!f) out.push(`<p class="lbl">Set type</p>
+    <div class="chips">${Object.entries(types).map(([k, v]) => `<button class="chip ${set.type === k ? 'on' : ''}" aria-pressed="${set.type === k}" data-act="so-type" data-v="${k}">${v}</button>`).join('')}</div>`);
+  if (show('note')) out.push(`<label class="fld"><span>Note</span><textarea data-act="so-note" rows="3" maxlength="300" placeholder="e.g. grip went first">${esc(set.note || '')}</textarea></label>`);
+  if (what) out.push(`<button class="ghost wide" data-act="so-later" data-what="${what}">${copy[what]}</button>`);
+  out.push('<button class="primary wide" data-act="sheet-close">Done</button>');
+  if (canRemove) out.push(`<button class="text-btn danger" data-act="so-remove">${isSs ? 'Remove this round' : 'Remove this set'}</button>`);
+  return out.join('\n    ');
+}
+
+function exNoteSheet(sh) {
+  const it = state.session.blocks[sh.b].items[sh.i];
+  return `<h2>Note</h2>
+    <p class="hint">${esc(exOf(it.exId).name)}, for this session</p>
+    <label class="fld"><span>Note</span><textarea data-act="ex-note-in" rows="4" maxlength="500" placeholder="e.g. seat on 4, felt strong">${esc(it.note || '')}</textarea></label>
     <button class="primary wide" data-act="sheet-close">Done</button>
-    ${canRemove ? `<button class="text-btn danger" data-act="so-remove">${isSs ? 'Remove this round' : 'Remove this set'}</button>` : ''}`;
+    ${(it.note || '').trim() ? '<button class="text-btn danger" data-act="ex-note-del">Delete note</button>' : ''}`;
+}
+
+function durSheet() {
+  const s = state.session;
+  const mins = Math.max(1, Math.round((s.endedAt - s.startedAt) / 60000));
+  return `<h2>Workout time</h2>
+    <p class="hint">You started at ${Sync.clock(s.startedAt)}. How many minutes did you train?</p>
+    <div class="field mid"><button class="step" data-act="dur-step" data-d="-5" aria-label="5 minutes less">−</button><label class="val"><input type="text" inputmode="numeric" value="${mins}" data-act="dur-in" aria-label="Minutes"><small>minutes</small></label><button class="step" data-act="dur-step" data-d="5" aria-label="5 minutes more">+</button></div>
+    <p class="hint" id="dur-end">Finished at ${Sync.clock(s.endedAt)}</p>
+    <button class="primary wide" data-act="sheet-close">Done</button>`;
+}
+
+function setDuration(mins) {
+  const s = state.session;
+  s.endedAt = s.startedAt + Math.min(600, Math.max(1, mins)) * 60000;
+  persist();
 }
 
 function stationSheet(sh) {
@@ -1287,7 +1343,7 @@ async function connectSync() {
 }
 
 // ---------- backups and programme files ----------
-const DATA_KEYS = ['last', 'start', 'bests', 'series', 'prs', 'sessions', 'tested', 'lastWorkout', 'gym', 'outbox'];
+const DATA_KEYS = ['last', 'start', 'bests', 'series', 'prs', 'sessions', 'tested', 'lastWorkout', 'gym', 'outbox', 'tempos'];
 
 function saveBackup() {
   const out = { app: 'repsheet', kind: 'backup', version: VERSION, savedAt: new Date().toISOString(), db };
@@ -1384,9 +1440,19 @@ function renderSheet() {
     body = dataSheet(sh);
   } else if (sh.kind === 'sync') {
     body = syncSheet();
+  } else if (sh.kind === 'exnote') {
+    body = exNoteSheet(sh);
+  } else if (sh.kind === 'dur') {
+    body = durSheet();
   }
   el.className = 'on';
   el.innerHTML = `<div class="sheet-back" data-act="sheet-close"></div><div class="sheet-panel" role="dialog" aria-modal="true">${body}<button class="ghost wide" data-act="sheet-close">Close</button></div>`;
+}
+
+function closeSheet() {
+  state.sheet = null;
+  renderSheet();
+  if (state.screen === 'workout' || state.screen === 'summary') renderScreen();
 }
 
 // ---------- render ----------
@@ -1573,6 +1639,9 @@ function saveSession() {
   }
   store.set('series', series);
   store.set('last', lastMap);
+  const tempos = store.get('tempos', {});
+  for (const b of s.blocks) for (const it of b.items || []) for (const x of it.sets) if (x.done && x.tempo) tempos[x.tempo] = (tempos[x.tempo] || 0) + 1;
+  store.set('tempos', tempos);
   const message = Sync.sessionMessage(s, syncHelpers());
   if (s.keep && db.workouts[s.workoutId]) { db.workouts[s.workoutId] = sessionToTemplate(s, db.workouts[s.workoutId]); saveDb(); }
   store.set('lastWorkout', s.workoutId);
@@ -1600,6 +1669,7 @@ function pickExercise(x, sh) {
       const base = sameTrack ? { ...old.rx, ex: x } : { ...defaultRx(x), sets: old.rx.sets, rest: old.rx.rest };
       const fresh = buildItem(base, s.gymId, block.type === 'superset' ? block.rounds : undefined);
       fresh.from = x === orig ? null : orig;
+      if (old.note) fresh.note = old.note;
       block.items[sh.i] = fresh;
       s.changed = true;
       persist();
@@ -1696,7 +1766,7 @@ function onAction(el) {
     case 'setgym': state.gymId = el.dataset.g; store.set('gym', state.gymId); state.sheet = null; renderSheet(); renderScreen(); break;
     case 'gym-edit': state.gymDraft = clone(gymById(el.dataset.g)); state.back = state.screen; state.sheet = null; renderSheet(); state.screen = 'gym-edit'; renderScreen(); break;
     case 'gym-new': state.gymDraft = { id: uid('g'), name: '', plate: 1.25, dumbbells: '1-10/1, 12-50/2', kettlebells: '8, 12, 16, 20, 24', stations: [], use: {} }; state.back = state.screen; state.sheet = null; renderSheet(); state.screen = 'gym-edit'; renderScreen(); break;
-    case 'sheet-close': state.sheet = null; renderSheet(); break;
+    case 'sheet-close': closeSheet(); break;
     case 'data': state.sheet = { kind: 'data' }; renderSheet(); break;
     case 'data-save': saveBackup(); break;
     case 'data-pick': $('#data-file').click(); break;
@@ -1715,7 +1785,17 @@ function onAction(el) {
     case 'inc': adjust(row, el.closest('.field').dataset.f, 1); break;
     case 'dec': adjust(row, el.closest('.field').dataset.f, -1); break;
     case 'tick': onTick(row); break;
-    case 'setopts': { const r = el.closest('.set'); state.sheet = { kind: 'set', b: +r.dataset.b, i: +r.dataset.i, s: +r.dataset.s }; renderSheet(); break; }
+    case 'setopts': {
+      const r = el.closest('.set');
+      state.sheet = { kind: 'set', b: +r.dataset.b, i: +r.dataset.i, s: +r.dataset.s, focus: el.dataset.focus || null };
+      renderSheet();
+      if (state.sheet.focus === 'note') $('#sheet textarea')?.focus();
+      break;
+    }
+    case 'exnote': state.sheet = { kind: 'exnote', b: +el.dataset.b, i: +el.dataset.i }; renderSheet(); $('#sheet textarea')?.focus(); break;
+    case 'ex-note-del': { const sh = state.sheet; delete s.blocks[sh.b].items[sh.i].note; persist(); closeSheet(); toast('Note deleted'); break; }
+    case 'dur': state.sheet = { kind: 'dur' }; renderSheet(); break;
+    case 'dur-step': setDuration(Math.round((s.endedAt - s.startedAt) / 60000) + Number(el.dataset.d)); renderSheet(); renderScreen(); break;
     case 'add-set': {
       const it = s.blocks[+el.dataset.b].items[0];
       const src = [...it.sets].reverse().find((x) => x.type !== 'warmup') || it.sets[it.sets.length - 1];
@@ -1756,10 +1836,15 @@ function onAction(el) {
     case 'so-extra': { const sh = state.sheet; const set = s.blocks[sh.b].items[sh.i].sets[sh.s]; set.extra = Math.max(0, (set.extra || 0) + Number(el.dataset.d)); persist(); renderScreen(); renderSheet(); break; }
     case 'so-type': { const sh = state.sheet; s.blocks[sh.b].items[sh.i].sets[sh.s].type = el.dataset.v; persist(); renderScreen(); renderSheet(); break; }
     case 'so-later': {
-      const sh = state.sheet; const it = s.blocks[sh.b].items[sh.i]; const src = it.sets[sh.s];
+      const sh = state.sheet; const it = s.blocks[sh.b].items[sh.i]; const src = it.sets[sh.s]; const what = el.dataset.what || 'both';
       let n = 0;
-      for (const later of it.sets.slice(sh.s + 1)) if (!later.done && later.type !== 'warmup') { later.tempo = src.tempo; later.extra = src.extra; n += 1; }
-      persist(); renderScreen(); toast(n ? `Copied to ${n} more set${n > 1 ? 's' : ''}` : 'No sets left to copy to'); break;
+      it.sets.forEach((x, k) => {
+        if (k === sh.s || x.type === 'warmup' || x.type === 'drop') return;
+        if (what !== 'extra') x.tempo = src.tempo;
+        if (what !== 'tempo') x.extra = src.extra;
+        n += 1;
+      });
+      persist(); renderScreen(); toast(n ? `Copied to ${n} more set${n > 1 ? 's' : ''}` : 'No other sets to copy to'); break;
     }
     case 'so-remove': {
       const sh = state.sheet; const b = s.blocks[sh.b];
@@ -2018,6 +2103,18 @@ function onTyping(el) {
     case 'lib-q': state.libQ = v; $('#lib-list').innerHTML = libListHtml(v); break;
     case 'exf-name': state.exDraft.name = v; break;
     case 'e-name': state.edit.draft.name = v; break;
+    case 'so-tempo-in': {
+      const set = sheetSet(); set.tempo = v.trim() || null; persist();
+      document.querySelectorAll('#sheet [data-act="so-tempo"]').forEach((c) => c.classList.toggle('on', (c.dataset.v || null) === set.tempo));
+      break;
+    }
+    case 'so-note': { const set = sheetSet(); if (v.trim()) set.note = v; else delete set.note; persist(); break; }
+    case 'ex-note-in': { const sh = state.sheet; const it = state.session.blocks[sh.b].items[sh.i]; if (v.trim()) it.note = v; else delete it.note; persist(); break; }
+    case 'dur-in': {
+      const n = parseInt(v, 10);
+      if (n >= 1) { setDuration(n); $('#dur-end').textContent = `Finished at ${Sync.clock(state.session.endedAt)}`; }
+      break;
+    }
     case 'e-focus': state.edit.draft.focus = v; break;
     case 'e-saveas-name': state.edit.newName = v; break;
     case 'e-tempo': { const rx = state.edit.draft.blocks[+el.dataset.b].items[+el.dataset.i]; const t = v.trim(); if (t) rx.tempo = t; else delete rx.tempo; break; }
@@ -2041,11 +2138,6 @@ function onChange(el) {
     if (Number.isFinite(num)) state.test.plans[+at.dataset.l].attempts[+at.dataset.a].kg = num;
     persist(); renderScreen(); return;
   }
-  if (act === 'so-tempo-in') {
-    const sh = state.sheet; const t = el.value.trim();
-    state.session.blocks[sh.b].items[sh.i].sets[sh.s].tempo = t || null;
-    persist(); renderScreen(); renderSheet(); return;
-  }
   if (['g-db', 'g-kb', 'g-st-stack'].includes(act)) renderScreen();
 }
 
@@ -2058,10 +2150,11 @@ document.addEventListener('input', (e) => { if (e.target.dataset?.act) onTyping(
 document.addEventListener('change', (e) => { if (e.target.dataset?.act) onChange(e.target); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (state.sheet) { state.sheet = null; renderSheet(); }
+    if (state.sheet) closeSheet();
     $('#flash').className = ''; $('#celebrate').className = '';
   }
   if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'search') e.target.blur();
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('div[role="button"][data-act]')) { e.preventDefault(); onAction(e.target); }
 });
 
 // ---------- boot ----------
