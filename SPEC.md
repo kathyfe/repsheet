@@ -118,6 +118,12 @@ Status: draft for Kathy's review, 20 Oct 2026.
 - **Drop sets** can be planned on the last set (`dropLast`, a toggle in the workout editor). The drop is about a third.
 - **Circuits** can have a name (`title`, e.g. Warm-up), and rest between rounds can be zero.
 
+### Prototype 0.4 (6 Nov 2026)
+- **Sheet sync.** Each finished session and PR session goes in an outbox on the phone, then to `repsheet log` when there's signal: on saving, on opening the app and on coming back online. It stays queued until the Sheet confirms it. Sessions saved before connecting wait and send on connect.
+- **Connecting** happens under "Back up or load a file". The web app link and key stay in this phone's storage and are left out of backups.
+- **Routines mirror.** Any change to routines, exercises or gyms refreshes the Workouts, Library and Gyms tabs, with a readable summary per workout next to the JSON.
+- **The script** is `sheet/Code.gs`. It makes its own tabs, keeps dates, times and tempos as text so Sheets doesn't turn them into dates, grows past the default 1,000 rows, and swaps a session's rows on a resend.
+
 ## 4. Not in the MVP
 
 - Watch app, heart rate, Google Health sync (Google's API isn't open to new projects yet).
@@ -181,7 +187,7 @@ Sending a session again replaces its rows (matched on session_id), so retries ne
 ## 8. Milestones
 
 1. **Spec agreed.** This document.
-2. **Clickable prototype:** Today, Workout in progress, circuit timers, PR moments, PR board, graphs and PR session, with sample data. Live at https://kathyfe.github.io/repsheet/app/ (prototype 0.3, 6 Nov 2026). Kathy tries it in the gym.
+2. **Clickable prototype:** Today, Workout in progress, circuit timers, PR moments, PR board, graphs and PR session, with sample data. Live at https://kathyfe.github.io/repsheet/app/ (prototype 0.4, 6 Nov 2026). Kathy tries it in the gym.
 3. **MVP:** storage, builder, library, gyms, history, PRs, graphs, PR session, installable, Sheet sync.
 4. **Lyfta import and coach hook-up:** history in, Health Coach's weekly review skill reads the Sheet.
 5. **First functional block** built in the app and running.

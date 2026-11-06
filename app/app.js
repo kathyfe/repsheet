@@ -2,8 +2,9 @@ import {
   SEED_VERSION, BLOCK, GROUPS, EQUIP, TRACKS, EXERCISES, GYMS, WORKOUTS, ORDER, LAST, BEST, SERIES, MAIN_LIFTS, WEEKLY,
 } from './data.js';
 import * as L from './logic.js';
+import * as Sync from './sync.js';
 
-const VERSION = 'prototype 0.3';
+const VERSION = 'prototype 0.4';
 
 // ---------- small helpers ----------
 const $ = (sel) => document.querySelector(sel);
@@ -33,7 +34,7 @@ function loadDb() {
   return d;
 }
 let db = loadDb();
-const saveDb = () => store.set('db', db);
+const saveDb = () => { store.set('db', db); markDirty(); };
 
 const exOf = (id) => db.exercises[id] || { name: 'Unknown exercise', group: 'Other', equip: 'other', track: 'kgReps' };
 const gymById = (id) => db.gyms.find((g) => g.id === id) || db.gyms[0];
@@ -257,6 +258,15 @@ function circuitSub(b) {
   }
 }
 
+function workoutSummary(w) {
+  return w.blocks.map((b) => {
+    const dose = (rx, n) => { const ex = exOf(rx.ex); return `${ex.name} ${doseOf(rx, ex, n)}${rx.tempo ? `, tempo ${rx.tempo}` : ''}${rx.dropLast ? ', drop set on the last' : ''}`; };
+    if (b.type === 'straight') return dose(b.items[0], b.items[0].sets);
+    if (b.type === 'superset') return `Superset: ${b.items.map((rx) => dose(rx, b.rounds)).join(' + ')}`;
+    return `${circuitTitle(b)}${b.title && b.rounds ? `, ${roundsText(b.rounds)}` : ''}: ${b.items.map((m) => `${m.text}${m.detail ? ` (${m.detail})` : ''}`).join(', ')}`;
+  }).join('; ');
+}
+
 function setText(s, track) {
   const extra = s.extra ? ` + ${s.extra} to failure` : '';
   if (track === 'kgReps') return `${L.fmtKg(s.kg)} kg × ${s.reps}${extra}`;
@@ -441,7 +451,7 @@ function todayScreen() {
     ${others}
     <button class="ghost wide" data-act="new-workout">New workout</button>
   </section>
-  <p class="note">${isReal() ? 'Everything saves on this phone, so back it up now and then.' : 'This is a prototype with sample numbers. Sessions save on this phone only.'} Syncing to your Sheet comes with the MVP. ${VERSION}.</p>
+  <p class="note">${isReal() ? 'Everything saves on this phone, so back it up now and then.' : 'This is a prototype with sample numbers. Sessions save on this phone only.'} ${syncLine()} ${VERSION}.</p>
   <button class="ghost wide" data-act="data">Back up or load a file</button>
   ${tabs()}`;
 }
@@ -1174,8 +1184,110 @@ function stationSheet(sh) {
     <button class="primary wide" data-act="st-create">Add station and use it</button>`;
 }
 
+// ---------- Google Sheet sync ----------
+// Sessions wait in an outbox on the phone and leave when there's signal. Nothing is lost offline.
+let syncing = false;
+let dirtyTimer = null;
+
+const waitingText = (n) => `${n} session${n === 1 ? '' : 's'} waiting`;
+
+function syncLine() {
+  const waiting = store.get('outbox', []).length;
+  if (!store.get('sync', null)) return waiting ? `${waitingText(waiting)} for your Sheet.` : '';
+  return waiting ? `${waitingText(waiting)} to send to your Sheet.` : 'Sessions go to your Sheet when you finish.';
+}
+
+function syncSection() {
+  const on = store.get('sync', null);
+  const waiting = store.get('outbox', []).length;
+  if (!on) {
+    return `<p class="hint">Not connected yet.${waiting ? ` ${waitingText(waiting)}, and they'll send once you connect.` : ''}</p>
+      <button class="ghost wide" data-act="sync-setup">Connect Google Sheet</button>`;
+  }
+  const at = store.get('syncedAt', null);
+  return `<p class="hint">Connected. ${waiting ? `${waitingText(waiting)}.` : 'Everything is sent.'}${at ? ` Last sent ${shortDate(at)}, ${Sync.clock(at)}.` : ''}</p>
+    <button class="ghost wide" data-act="sync-now">Send now</button>
+    <button class="text-btn" data-act="sync-off">Disconnect</button>`;
+}
+
+function syncSheet() {
+  return `<h2>Connect Google Sheet</h2>
+    <p class="hint">Paste the web app link and key from your Google setup. They stay on this phone.</p>
+    <label class="fld"><span>Web app link</span><input type="url" id="sync-url" placeholder="https://script.google.com/.../exec" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <label class="fld"><span>Key</span><input type="text" id="sync-key" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <button class="primary wide" data-act="sync-connect">Connect</button>`;
+}
+
+function refreshSyncStatus() {
+  const el = $('#sync-status');
+  if (el) el.innerHTML = syncSection();
+  if (state.screen === 'today') renderScreen();
+}
+
+function syncHelpers() {
+  return {
+    letter,
+    gymName: (id) => gymById(id).name,
+    exName: (id) => exOf(id).name,
+    machine: (exId, gymId) => (isStation(exOf(exId)) ? stepsOf(exId, gymId)?.station?.name || '' : ''),
+    circuitLine: (b) => `${circuitTitle(b)}: ${circuitView(b).big}`,
+    minutes: L.estimateMinutes,
+    summary: workoutSummary,
+  };
+}
+
+function queueSync(message) {
+  store.set('outbox', [...store.get('outbox', []), message].slice(-200));
+  flushSync();
+}
+
+// Routines changed, so the Sheet's copy needs a refresh. Waits a moment to bundle quick edits.
+function markDirty() {
+  store.set('syncDirty', true);
+  clearTimeout(dirtyTimer);
+  dirtyTimer = setTimeout(flushSync, 1500);
+}
+
+async function flushSync() {
+  const cfg = store.get('sync', null);
+  if (!cfg || syncing || !navigator.onLine) return;
+  syncing = true;
+  try {
+    for (let box = store.get('outbox', []); box.length; box = store.get('outbox', [])) {
+      const res = await Sync.post(cfg, { session: box[0] });
+      if (!res.ok) throw new Error(res.error || 'refused');
+      store.set('outbox', store.get('outbox', []).slice(1));
+    }
+    if (store.get('syncDirty', false)) {
+      store.del('syncDirty');
+      const res = await Sync.post(cfg, { programme: Sync.programmeMessage(db, syncHelpers()) }).catch(() => null);
+      if (!res?.ok) { store.set('syncDirty', true); throw new Error('refused'); }
+    }
+    store.set('syncedAt', Date.now());
+  } catch { /* everything stays queued for the next try */ }
+  syncing = false;
+  refreshSyncStatus();
+}
+
+async function connectSync() {
+  const url = $('#sync-url').value.trim();
+  const key = $('#sync-key').value.trim();
+  if (!Sync.isSyncUrl(url)) { toast('That link should start with script.google.com and end in /exec'); return; }
+  if (!key) { toast('Add your key'); return; }
+  toast('Connecting...');
+  let res = null;
+  try { res = await Sync.post({ url, key }, {}); } catch { /* handled below */ }
+  if (!res?.ok) { toast(res?.error === 'key' ? "That key doesn't match the script" : "Couldn't reach the Sheet. Check the link and that the web app is deployed."); return; }
+  store.set('sync', { url, key });
+  store.set('syncDirty', true);
+  state.sheet = { kind: 'data' };
+  renderSheet();
+  toast(`Connected to ${res.sheet || 'your Sheet'}`);
+  flushSync();
+}
+
 // ---------- backups and programme files ----------
-const DATA_KEYS = ['last', 'start', 'bests', 'series', 'prs', 'sessions', 'tested', 'lastWorkout', 'gym'];
+const DATA_KEYS = ['last', 'start', 'bests', 'series', 'prs', 'sessions', 'tested', 'lastWorkout', 'gym', 'outbox'];
 
 function saveBackup() {
   const out = { app: 'repsheet', kind: 'backup', version: VERSION, savedAt: new Date().toISOString(), db };
@@ -1227,7 +1339,9 @@ function dataSheet(sh) {
       <p class="hint">Everything lives on this phone. A backup puts your routines, gyms and sessions in one file, so nothing's lost if you change phones.</p>
       <button class="primary wide" data-act="data-save">Download a backup</button>
       <button class="ghost wide" data-act="data-pick">Load a file</button>
-      <input type="file" id="data-file" data-act="data-file" hidden>`;
+      <input type="file" id="data-file" data-act="data-file" hidden>
+      <p class="lbl">Google Sheet</p>
+      <div id="sync-status">${syncSection()}</div>`;
   }
   if (f.kind === 'backup') {
     return `<h2>Restore this backup?</h2>
@@ -1268,6 +1382,8 @@ function renderSheet() {
     body = stationSheet(sh);
   } else if (sh.kind === 'data') {
     body = dataSheet(sh);
+  } else if (sh.kind === 'sync') {
+    body = syncSheet();
   }
   el.className = 'on';
   el.innerHTML = `<div class="sheet-back" data-act="sheet-close"></div><div class="sheet-panel" role="dialog" aria-modal="true">${body}<button class="ghost wide" data-act="sheet-close">Close</button></div>`;
@@ -1457,6 +1573,7 @@ function saveSession() {
   }
   store.set('series', series);
   store.set('last', lastMap);
+  const message = Sync.sessionMessage(s, syncHelpers());
   if (s.keep && db.workouts[s.workoutId]) { db.workouts[s.workoutId] = sessionToTemplate(s, db.workouts[s.workoutId]); saveDb(); }
   store.set('lastWorkout', s.workoutId);
   state.bests = clone(s.bests);
@@ -1466,6 +1583,7 @@ function saveSession() {
   keepAwake(false);
   persist();
   state.screen = 'today';
+  queueSync(message);
   renderScreen();
   toast(s.keep ? 'Saved, and the workout is updated for next time' : 'Session saved on this phone');
 }
@@ -1584,6 +1702,10 @@ function onAction(el) {
     case 'data-pick': $('#data-file').click(); break;
     case 'data-clear': state.sheet.clear = !state.sheet.clear; renderSheet(); break;
     case 'data-load': loadDataFile(state.sheet); break;
+    case 'sync-setup': state.sheet = { kind: 'sync' }; renderSheet(); break;
+    case 'sync-connect': connectSync(); break;
+    case 'sync-now': flushSync(); toast('Sending'); break;
+    case 'sync-off': store.del('sync'); refreshSyncStatus(); toast('Disconnected. Sessions wait on this phone.'); break;
     case 'pick': state.pick = el.dataset.w; renderScreen(); break;
     case 'start': startWorkout(db.workouts[el.dataset.w], el.dataset.w); break;
     case 'edit': openEditor(el.dataset.w, db.workouts[el.dataset.w]); break;
@@ -1879,8 +2001,9 @@ function onAction(el) {
         saved.push({ key: p.key, set: { kg, reps: t.reps }, track: 'kgReps', date });
       }
       store.set('tested', tested); store.set('prs', saved);
+      const message = Sync.testMessage(t, syncHelpers());
       state.bests = loadBests(); state.test = null; keepAwake(false); persist();
-      state.screen = 'prs'; renderScreen(); toast('PR session saved'); break;
+      state.screen = 'prs'; queueSync(message); renderScreen(); toast('PR session saved'); break;
     }
     default: break;
   }
@@ -1948,6 +2071,9 @@ renderRest();
 const notice = store.get('notice', null);
 if (notice) { store.del('notice'); toast(notice); }
 if (isReal()) navigator.storage?.persist?.()?.catch(() => { /* the browser decides */ });
+window.addEventListener('online', flushSync);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') flushSync(); });
+flushSync();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   let reloaded = false;
