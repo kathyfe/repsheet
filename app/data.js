@@ -12,10 +12,11 @@ export const EQUIP = {
 };
 
 export const TRACKS = {
-  kgReps: 'Weight and reps', reps: 'Reps only', time: 'Time', kgDistance: 'Weight and distance', distance: 'Distance', calories: 'Calories',
+  kgReps: 'Weight and reps', reps: 'Reps only', time: 'Time', kgDistance: 'Weight and distance', distance: 'Distance', calories: 'Calories', cardio: 'Distance, time and calories',
 };
 
-// track: kgReps | reps | time | kgDistance | distance | calories
+// track: kgReps | reps | time | kgDistance | distance | calories | cardio
+// cardio logs metres, time and calories and shows the pace (per km, or per 500 m with split: 500). damper: true adds a damper setting.
 export const EXERCISES = {
   squat: { name: 'Back squat', group: 'Quads', equip: 'barbell', track: 'kgReps', alts: ['frontSquat', 'gobletSquat'] },
   frontSquat: { name: 'Front squat', group: 'Quads', equip: 'barbell', track: 'kgReps', alts: ['squat', 'gobletSquat'] },
@@ -62,7 +63,14 @@ export const EXERCISES = {
   farmer: { name: 'Farmer carry', group: 'Full body', equip: 'kettlebell', track: 'kgDistance' },
   kbSwing: { name: 'Kettlebell swing', group: 'Full body', equip: 'kettlebell', track: 'kgReps' },
   wallBall: { name: 'Wall ball', group: 'Conditioning', equip: 'other', track: 'kgReps' },
-  rowErg: { name: 'Row erg', group: 'Conditioning', equip: 'bodyweight', track: 'distance' },
+  rowErg: { name: 'Row erg', group: 'Conditioning', equip: 'bodyweight', track: 'cardio', split: 500, damper: true, alts: ['skiErg', 'bike'] },
+  skiErg: { name: 'SkiErg', group: 'Conditioning', equip: 'bodyweight', track: 'cardio', split: 500, damper: true, alts: ['rowErg', 'bike'] },
+  run: { name: 'Run', group: 'Conditioning', equip: 'bodyweight', track: 'cardio' },
+  sledPush: { name: 'Sled push', group: 'Full body', equip: 'other', track: 'kgDistance', alts: ['sledPull'] },
+  sledPull: { name: 'Sled pull', group: 'Full body', equip: 'other', track: 'kgDistance', alts: ['sledPush'] },
+  kbAtw: { name: 'KB around the world', group: 'Core', equip: 'kettlebell', track: 'kgReps' },
+  burpee: { name: 'Burpee', group: 'Conditioning', equip: 'bodyweight', track: 'reps' },
+  ballSlam: { name: 'Ball slam', group: 'Conditioning', equip: 'other', track: 'kgReps' },
   bike: { name: 'Air bike', group: 'Conditioning', equip: 'bodyweight', track: 'calories' },
   hip9090: { name: '90/90 hip switch', group: 'Mobility', equip: 'bodyweight', track: 'reps' },
   wgs: { name: "World's greatest stretch", group: 'Mobility', equip: 'bodyweight', track: 'reps', perSide: true },

@@ -85,17 +85,22 @@ export function fromE1rm(e, reps) {
   return reps <= 1 ? e : e / (1 + reps / 30);
 }
 
-// Next session's working weight: up one step if every set hit the target reps.
-export function nextTarget(last, reps, steps) {
+// Sessions in a row at the same weight, every set hitting its reps, before the weight goes up.
+export const SOLID_SESSIONS = 4;
+
+// Next session's working weight. It only goes up after SOLID_SESSIONS solid sessions at the same weight.
+// solid counts those sessions, the last one included.
+export function nextTarget(last, reps, steps, solid = 0) {
   const work = (last || []).filter((s) => s.kg != null);
   if (!work.length) return null;
   const top = Math.max(...work.map((s) => s.kg));
   const hitAll = reps ? work.every((s) => (s.reps ?? 0) + (s.extra ?? 0) >= reps) : false;
-  if (hitAll && steps && !steps.unset) {
-    const n = nudge(top, 1, steps);
-    return { kg: n, bumped: n > top };
+  const n = hitAll ? Math.max(1, solid) : 0;
+  if (n >= SOLID_SESSIONS && steps && !steps.unset) {
+    const up = nudge(top, 1, steps);
+    return { kg: up, bumped: up > top, hitAll, solid: n };
   }
-  return { kg: top, bumped: false };
+  return { kg: top, bumped: false, hitAll, solid: n };
 }
 
 export function warmupRamp(workKg, steps, count) {
@@ -114,12 +119,13 @@ export function testPlan(best, reps, steps) {
   return { est: Math.round(est * 10) / 10, prev: best?.repMax?.[reps] ?? null, ramp, attempts };
 }
 
-// Rough session length in minutes, rounded to 5.
+// Rough session length in minutes, rounded to 5. Distance work counts at about 3 metres a second.
+const workSec = (rx) => (rx.distance ? Math.max(45, rx.distance / 3) : 45);
 export function estimateMinutes(blocks) {
   let sec = 0;
   for (const b of blocks || []) {
-    if (b.type === 'straight') { const it = b.items[0]; sec += (it.sets || 3) * ((it.rest || 90) + 45) + (it.warmups || 0) * 75; }
-    else if (b.type === 'superset') sec += (b.rounds || 3) * ((b.items.length * 45) + (b.rest || 90));
+    if (b.type === 'straight') { const it = b.items[0]; sec += (it.sets || 3) * ((it.rest ?? 90) + workSec(it)) + (it.warmups || 0) * 75; }
+    else if (b.type === 'superset') sec += (b.rounds || 3) * (b.items.reduce((a, rx) => a + workSec(rx), 0) + (b.rest ?? 90));
     else if (b.type === 'emom' || b.type === 'amrap') sec += (b.minutes || 10) * 60;
     else if (b.type === 'fortime') sec += (b.cap || 12) * 50;
     else if (b.type === 'rounds') sec += (b.rounds || 3) * ((b.items.length * 40) + (b.rest ?? 60));
@@ -136,6 +142,18 @@ export function fmtTime(sec) {
   const s = Math.max(0, Math.round(sec));
   const m = Math.floor(s / 60);
   return `${m}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// "65", "1:05" or "1.05" -> 65 seconds.
+export function parseTime(raw) {
+  const m = String(raw).trim().match(/^(\d+)[:.](\d{2})$/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : Number(raw);
+}
+
+// Pace for a distance and time, per km or per 500 m.
+export function pace(sec, metres, unit = 1000) {
+  if (!sec || !metres) return '';
+  return `${fmtTime((sec / metres) * unit)} /${unit === 1000 ? 'km' : `${unit} m`}`;
 }
 
 export function fmtRest(sec) {

@@ -131,6 +131,14 @@ Status: draft for Kathy's review, 20 Oct 2026.
 - **Tempo suggestions** are her five most used tempos, counted from ticked sets when a session is saved, topped up with common ones.
 - **Workout time** can be edited on the summary by tapping Time. Sessions over three hours get a nudge.
 
+### Prototype 0.6 (6 Nov 2026)
+- **History.** A History tab lists every saved session. Each one opens to show its sets, and Edit opens it with the usual set rows. Saving an edit re-sends the session to the Sheet under its original id, so its rows are replaced, and works out last time, bests, graph points and that session's PRs again. Sessions are stored in full on the phone (the last 300; the Sheet keeps all). Sessions saved before 0.6 aren't in it unless a file brings them in.
+- **Slower progression.** The weight only goes up after 4 sessions in a row at the same weight where every set hits its reps (`SOLID_SESSIONS` in logic.js). The workout shows how far along she is, e.g. "2 of 4 solid sessions at 39 kg".
+- **Cardio tracking** (`cardio`): metres, time and calories per set, with the pace shown (per km, or per 500 m for ergs). Times can be typed as 65, 1:05 or 1.05. Ergs have a damper setting the app remembers; it goes to the Sheet's machine column as "damper 5".
+- **Starter exercises:** SkiErg, Run, Sled push, Sled pull, KB around the world, Burpee, Ball slam; Row erg now uses cardio tracking.
+- **Programme files** can now update a routine and bring past sessions into history. The first file still replaces the sample routines; later ones only touch the routines they name.
+- Rest of zero means no rest timer. PR session results now count towards bests.
+
 ## 4. Not in the MVP
 
 - Watch app, heart rate, Google Health sync (Google's API isn't open to new projects yet).
@@ -194,7 +202,7 @@ Sending a session again replaces its rows (matched on session_id), so retries ne
 ## 8. Milestones
 
 1. **Spec agreed.** This document.
-2. **Clickable prototype:** Today, Workout in progress, circuit timers, PR moments, PR board, graphs and PR session, with sample data. Live at https://kathyfe.github.io/repsheet/app/ (prototype 0.5, 6 Nov 2026). Kathy tries it in the gym.
+2. **Clickable prototype:** Today, Workout in progress, circuit timers, PR moments, PR board, graphs and PR session, with sample data. Live at https://kathyfe.github.io/repsheet/app/ (prototype 0.6, 6 Nov 2026). Kathy tries it in the gym.
 3. **MVP:** storage, builder, library, gyms, history, PRs, graphs, PR session, installable, Sheet sync.
 4. **Lyfta import and coach hook-up:** history in, Health Coach's weekly review skill reads the Sheet.
 5. **First functional block** built in the app and running.

@@ -4,7 +4,7 @@ import {
 import * as L from './logic.js';
 import * as Sync from './sync.js';
 
-const VERSION = 'prototype 0.5';
+const VERSION = 'prototype 0.6';
 
 // ---------- small helpers ----------
 const $ = (sel) => document.querySelector(sel);
@@ -47,11 +47,37 @@ let lastMap = store.get('last', {});
 const startMap = store.get('start', {});
 const lastFor = (key) => lastMap[key] ?? (isReal() ? null : LAST[key]) ?? null;
 
+// ---------- history: every saved session in full, oldest first ----------
+// Kept in memory between writes, so screens stay quick as history grows. The phone keeps the last 300; the Sheet keeps all.
+let histCache = null;
+const histList = () => (histCache ||= store.get('history', []).sort((a, b) => a.startedAt - b.startedAt)).slice();
+function setHistory(list) { store.set('history', list.sort((a, b) => a.startedAt - b.startedAt).slice(-300)); histCache = null; }
+const itemsOf = (h) => h.blocks.flatMap((b) => b.items || []);
+const keysOf = (h) => new Set(itemsOf(h).map((it) => it.key));
+const workSets = (sets) => sets.filter((x) => x.done && (x.type === 'working' || x.type === 'failure'));
+
+// Solid sessions in a row at the same top weight, newest first, where every working set hit the reps.
+function solidCount(key, reps) {
+  if (!reps) return 0;
+  let n = 0;
+  let kg = null;
+  for (const h of histList().reverse()) {
+    const work = itemsOf(h).filter((it) => it.key === key).flatMap((it) => workSets(it.sets)).filter((x) => x.kg != null);
+    if (!work.length) continue;
+    const top = Math.max(...work.map((x) => x.kg));
+    if (kg == null) kg = top; else if (top !== kg) break;
+    if (!work.every((x) => (x.reps ?? 0) + (x.extra ?? 0) >= reps)) break;
+    n += 1;
+  }
+  return n;
+}
+
 function defaultRx(exId) {
   const t = exOf(exId).track;
   const rx = { ex: exId, sets: 3, rest: 90 };
   if (t === 'time') rx.time = 30;
   else if (t === 'kgDistance' || t === 'distance') rx.distance = 40;
+  else if (t === 'cardio') rx.distance = 500;
   else if (t === 'calories') rx.cal = 15;
   else rx.reps = 10;
   return rx;
@@ -126,13 +152,15 @@ const state = {
   libQ: '',
   back: 'today',
   bests: loadBests(),
+  histId: null,
+  histEdit: null,
 };
 if (!db.gyms.find((g) => g.id === state.gymId)) state.gymId = db.gyms[0].id;
 if (state.session) state.screen = state.session.endedAt ? 'summary' : 'workout';
 else if (state.test) state.screen = 'test';
 
 function persist() {
-  if (state.session) store.set('active', state.session); else store.del('active');
+  if (!state.histEdit) { if (state.session) store.set('active', state.session); else store.del('active'); }
   if (state.test) store.set('test', state.test); else store.del('test');
 }
 
@@ -173,7 +201,7 @@ function buildItem(rx, gymId, rounds) {
     }
   }
   const target = ex.track === 'kgReps' || ex.track === 'kgDistance'
-    ? L.nextTarget(last, ex.track === 'kgReps' ? rx.reps : null, steps) ?? (hint ? null : startTarget(rx.ex, steps))
+    ? L.nextTarget(last, ex.track === 'kgReps' ? rx.reps : null, steps, ex.track === 'kgReps' ? solidCount(key, rx.reps) : 0) ?? (hint ? null : startTarget(rx.ex, steps))
     : null;
   const n = rounds || rx.sets || 3;
   const sets = [];
@@ -184,14 +212,15 @@ function buildItem(rx, gymId, rounds) {
     sets.push(newSet('working', {
       kg: target?.kg ?? null,
       reps: rx.reps ?? null,
-      time: rx.time ?? last?.[0]?.time ?? null,
+      time: ex.track === 'cardio' ? null : rx.time ?? last?.[0]?.time ?? null,
       dist: rx.distance ?? last?.[0]?.dist ?? null,
       cal: rx.cal ?? null,
       tempo: rx.tempo || null,
     }));
   }
   if (rx.dropLast && !rounds) sets.push(newSet('drop', { kg: dropKg(target?.kg, steps), reps: rx.reps ?? null }));
-  return { exId: rx.ex, from: null, rx: clone(rx), key, last, hint, target, sets };
+  const damper = ex.damper ? store.get('dampers', {})[rx.ex] ?? null : undefined;
+  return { exId: rx.ex, from: null, rx: clone(rx), key, last, hint, target, sets, damper };
 }
 
 function freshCircuit() {
@@ -267,6 +296,10 @@ function workoutSummary(w) {
   }).join('; ');
 }
 
+function cardioText(s) {
+  return `${s.dist ?? '–'} m${s.time ? ` in ${L.fmtTime(s.time)}` : ''}${s.cal ? `, ${s.cal} cal` : ''}`;
+}
+
 function setText(s, track) {
   const extra = s.extra ? ` + ${s.extra} to failure` : '';
   if (track === 'kgReps') return `${L.fmtKg(s.kg)} kg × ${s.reps}${extra}`;
@@ -274,6 +307,7 @@ function setText(s, track) {
   if (track === 'kgDistance') return `${L.fmtKg(s.kg)} kg for ${s.dist} m`;
   if (track === 'distance') return `${s.dist} m`;
   if (track === 'calories') return `${s.cal} cal`;
+  if (track === 'cardio') return cardioText(s);
   return `${s.reps} reps${extra}`;
 }
 
@@ -283,10 +317,11 @@ function doseOf(rx, ex, count) {
   if (rx.time) return `${count} × ${rx.time} s${side}`;
   if (rx.distance) return `${count} × ${rx.distance} m${side}`;
   if (rx.cal) return `${count} × ${rx.cal} cal`;
-  return `${count} sets`;
+  return `${count} set${count === 1 ? '' : 's'}`;
 }
 
 function lastLine(item, gymId) {
+  if (state.histEdit) return '';
   const ex = exOf(item.exId);
   const bits = [];
   if (item.from) bits.push(`Swapped from ${esc(exOf(item.from).name)} for this session.`);
@@ -298,12 +333,14 @@ function lastLine(item, gymId) {
       bits.push(same
         ? `Last time ${L.fmtKg(last[0].kg)} kg × ${last.map(reps).join(', ')}.`
         : `Last time ${last.map((s) => `${L.fmtKg(s.kg)} × ${reps(s)}`).join(', ')}.`);
-      if (item.target?.bumped) bits.push(`<b class="up">Up to ${L.fmtKg(item.target.kg)} kg today.</b>`);
-      else if (item.rx.reps) bits.push(`Same weight until every set hits ${item.rx.reps}.`);
+      if (item.target?.bumped) bits.push(`<b class="up">Up to ${L.fmtKg(item.target.kg)} kg today</b>, after ${L.SOLID_SESSIONS} solid sessions.`);
+      else if (item.rx.reps && !item.target?.hitAll) bits.push(`Same weight until every set hits ${item.rx.reps}.`);
+      else if (item.rx.reps) bits.push(`${item.target.solid} of ${L.SOLID_SESSIONS} solid sessions at ${L.fmtKg(item.target.kg)} kg before going up.`);
     } else if (ex.track === 'time') bits.push(`Last time ${last.map((s) => s.time).join(', ')} s.`);
     else if (ex.track === 'kgDistance') bits.push(`Last time ${L.fmtKg(last[0].kg)} kg for ${last[0].dist} m.`);
     else if (ex.track === 'distance') bits.push(`Last time ${last.map((s) => s.dist).join(', ')} m.`);
     else if (ex.track === 'calories') bits.push(`Last time ${last.map((s) => s.cal).join(', ')} cal.`);
+    else if (ex.track === 'cardio') bits.push(`Last time ${last.map(cardioText).join(', ')}.`);
     else bits.push(`Last time ${last.map((s) => s.reps).join(', ')}.`);
   } else if (item.target?.start) {
     bits.push(`Starting weight ${L.fmtKg(item.target.kg)} kg. Nudge it if the first set feels off.`);
@@ -358,17 +395,19 @@ function tabs() {
   const on = (s) => {
     if (s === 'prs') return ['prs', 'detail'].includes(state.screen) ? 'on' : '';
     if (s === 'exercises') return state.screen === 'exercises' ? 'on' : '';
+    if (s === 'history') return ['history', 'hist'].includes(state.screen) ? 'on' : '';
     return state.screen === s ? 'on' : '';
   };
   return `<nav class="tabs" aria-label="Main">
     <button class="${on('today')}" data-act="nav" data-to="today">Today</button>
+    <button class="${on('history')}" data-act="nav" data-to="history">History</button>
     <button class="${on('exercises')}" data-act="nav" data-to="exercises">Exercises</button>
     <button class="${on('prs')}" data-act="nav" data-to="prs">PRs</button>
   </nav>`;
 }
 
-function field(name, value, mode, unit, label, done) {
-  const shown = value == null ? '' : name === 'kg' ? L.fmtKg(value) : value;
+function field(name, value, mode, unit, label, done, display) {
+  const shown = display ?? (value == null ? '' : name === 'kg' ? L.fmtKg(value) : value);
   const dis = done ? 'disabled' : '';
   return `<div class="field" data-f="${name}">
     <button class="step" data-act="dec" aria-label="Less ${label}" ${dis}>−</button>
@@ -381,12 +420,15 @@ function setRow(bi, ii, si, s, item, label) {
   const ex = exOf(item.exId);
   const t = ex.track;
   const side = ex.perSide ? ' each side' : '';
+  const lock = s.done && !state.histEdit;
   const f = [];
-  if (t === 'kgReps' || t === 'kgDistance') f.push(field('kg', s.kg, 'decimal', 'kg', 'weight', s.done));
-  if (t === 'kgReps' || t === 'reps') f.push(field('reps', s.reps, 'numeric', `reps${side}`, 'reps', s.done));
-  if (t === 'time') f.push(field('time', s.time, 'numeric', `sec${side}`, 'seconds', s.done));
-  if (t === 'kgDistance' || t === 'distance') f.push(field('dist', s.dist, 'numeric', `metres${side}`, 'metres', s.done));
-  if (t === 'calories') f.push(field('cal', s.cal, 'numeric', 'cal', 'calories', s.done));
+  if (t === 'kgReps' || t === 'kgDistance') f.push(field('kg', s.kg, 'decimal', 'kg', 'weight', lock));
+  if (t === 'kgReps' || t === 'reps') f.push(field('reps', s.reps, 'numeric', `reps${side}`, 'reps', lock));
+  if (t === 'kgDistance' || t === 'distance' || t === 'cardio') f.push(field('dist', s.dist, 'numeric', `metres${side}`, 'metres', lock));
+  if (t === 'time') f.push(field('time', s.time, 'decimal', `sec${side}`, 'seconds', lock));
+  if (t === 'cardio') f.push(field('time', s.time, 'decimal', 'time', 'time', lock, s.time == null ? '' : L.fmtTime(s.time)));
+  if (t === 'calories' || t === 'cardio') f.push(field('cal', s.cal, 'numeric', 'cal', 'calories', lock));
+  const pace = t === 'cardio' ? L.pace(s.time, s.dist, ex.split || 1000) : '';
   const bubbles = [];
   if (s.tempo) bubbles.push(`<button class="bubble" data-act="setopts" data-focus="tempo" aria-label="Change tempo">Tempo ${esc(s.tempo)}</button>`);
   if (s.extra) bubbles.push(`<button class="bubble" data-act="setopts" data-focus="extra" aria-label="Change reps to failure">+${s.extra} to failure</button>`);
@@ -394,11 +436,17 @@ function setRow(bi, ii, si, s, item, label) {
   const note = (s.note || '').trim();
   return `<div class="set ${s.type} ${s.done ? 'done' : ''}" data-b="${bi}" data-i="${ii}" data-s="${si}">
     <button class="set-label" data-act="setopts" aria-label="Options for set ${label}">${label}<i aria-hidden="true"></i></button>
-    <div class="fields" style="--n:${f.length}">${f.join('')}</div>
+    <div class="fields${f.length === 3 ? ' three' : ''}" style="--n:${f.length}">${f.join('')}</div>
     <button class="tick" data-act="tick" aria-pressed="${s.done}" aria-label="${s.done ? 'Undo this set' : 'Log this set'}">${CHECK}</button>
+    ${pace ? `<p class="pace">Pace ${pace}</p>` : ''}
     ${bubbles.length ? `<div class="set-meta">${bubbles.join('')}</div>` : ''}
     ${note ? `<button class="set-note" data-act="setopts" data-focus="note" aria-label="Change note">${esc(note)}</button>` : ''}
   </div>`;
+}
+
+function damperLine(it, bi, ii) {
+  if (!exOf(it.exId).damper) return '';
+  return `<button class="machine" data-act="damper" data-b="${bi}" data-i="${ii}">Damper ${it.damper ?? 'not set'}<span aria-hidden="true"> ▾</span></button>`;
 }
 
 function exNote(it, bi, ii) {
@@ -426,6 +474,7 @@ function previewRows(tpl, gymId) {
         let load = '';
         if (it.target) load = `<span class="load ${it.target.bumped ? 'up' : ''}">${L.fmtKg(it.target.kg)} kg</span>`;
         else if (isStation(ex)) load = `<span class="load new">${stepsOf(rx.ex, gymId).unset ? 'Pick station' : 'New here'}</span>`;
+        else if (ex.track === 'cardio') load = '';
         else if (ex.equip === 'bodyweight') load = '<span class="load">Body</span>';
         return `<li><span class="tag">${tag}</span><span class="nm">${esc(ex.name)}</span><span class="dose">${doseOf(rx, ex, b.type === 'superset' ? b.rounds : rx.sets)}</span>${load}</li>`;
       });
@@ -470,7 +519,7 @@ function straightBlock(b, bi) {
   const working = it.sets.filter((s) => s.type !== 'warmup' && s.type !== 'drop').length;
   const rx = [doseOf(it.rx, ex, working)];
   if (it.rx.tempo) rx.push(`tempo ${esc(it.rx.tempo)}`);
-  rx.push(`rest ${L.fmtRest(b.rest)}`);
+  if (b.rest) rx.push(`rest ${L.fmtRest(b.rest)}`);
   let w = 0;
   const rows = it.sets.map((s, si) => {
     const label = s.type === 'warmup' ? 'W' : s.type === 'drop' ? '↓' : String(++w);
@@ -480,7 +529,7 @@ function straightBlock(b, bi) {
   return `<section class="block" id="b${bi}">
     <header class="bh">
       <span class="letter">${letter(bi)}</span>
-      <div class="bh-text"><h2>${esc(ex.name)}</h2><p class="rx">${rx.join(', ')}</p>${stationLine(it, bi, 0, state.session.gymId)}</div>
+      <div class="bh-text"><h2>${esc(ex.name)}</h2><p class="rx">${rx.join(', ')}</p>${stationLine(it, bi, 0, state.session.gymId)}${damperLine(it, bi, 0)}</div>
       ${!anyDone ? `<button class="chip small" data-act="swap" data-b="${bi}" data-i="0">Swap</button>` : ''}
     </header>
     ${lastLine(it, state.session.gymId)}
@@ -501,7 +550,7 @@ function supersetBlock(b, bi) {
     const anyDone = it.sets.some((s) => s.done);
     return `<div class="ss-item">
       <span class="tag">${tagBase}${ii + 1}</span>
-      <div class="bh-text"><h3>${esc(ex.name)}</h3><p class="rx">${doseOf(it.rx, ex, b.rounds)}${it.rx.tempo ? `, tempo ${esc(it.rx.tempo)}` : ''}</p>${stationLine(it, bi, ii, state.session.gymId)}${lastLine(it, state.session.gymId)}${exNote(it, bi, ii) || `<button class="chip small note-add" data-act="exnote" data-b="${bi}" data-i="${ii}">+ Note</button>`}</div>
+      <div class="bh-text"><h3>${esc(ex.name)}</h3><p class="rx">${doseOf(it.rx, ex, b.rounds)}${it.rx.tempo ? `, tempo ${esc(it.rx.tempo)}` : ''}</p>${stationLine(it, bi, ii, state.session.gymId)}${damperLine(it, bi, ii)}${lastLine(it, state.session.gymId)}${exNote(it, bi, ii) || `<button class="chip small note-add" data-act="exnote" data-b="${bi}" data-i="${ii}">+ Note</button>`}</div>
       ${!anyDone ? `<button class="chip small" data-act="swap" data-b="${bi}" data-i="${ii}">Swap</button>` : ''}
     </div>`;
   }).join('');
@@ -512,7 +561,7 @@ function supersetBlock(b, bi) {
   return `<section class="block" id="b${bi}">
     <header class="bh">
       <span class="letter">${tagBase}</span>
-      <div class="bh-text"><h2>Superset</h2><p class="rx">${b.rounds} rounds, rest ${L.fmtRest(b.rest)} after ${tagBase}${b.items.length}</p></div>
+      <div class="bh-text"><h2>Superset</h2><p class="rx">${roundsText(b.rounds)}, ${b.rest ? `rest ${L.fmtRest(b.rest)} after ${tagBase}${b.items.length}` : 'no rest'}</p></div>
     </header>
     ${intro}
     ${rounds}
@@ -550,6 +599,10 @@ function circuitView(b, now = Date.now()) {
 }
 
 function circuitBlock(b, bi) {
+  if (state.histEdit) {
+    const result = b.c.status === 'idle' && !b.c.rounds ? 'Not done' : circuitView(b).big;
+    return `<section class="block circuit" id="b${bi}"><header class="bh"><span class="letter">${letter(bi)}</span><div class="bh-text"><h2>${esc(circuitTitle(b))}</h2><p class="rx">${esc(result)}</p></div></header></section>`;
+  }
   const d = b.def;
   const c = b.c;
   const v = circuitView(b);
@@ -595,6 +648,7 @@ function circuitBlock(b, bi) {
 
 function workoutScreen() {
   const s = state.session;
+  if (state.histEdit) return histEditScreen(s);
   const blocks = s.blocks.map((b, bi) => {
     if (b.type === 'straight') return straightBlock(b, bi);
     if (b.type === 'superset') return supersetBlock(b, bi);
@@ -922,6 +976,7 @@ function exEditScreen() {
   <p class="lbl">Equipment</p>${chips('exf-equip', Object.keys(EQUIP), d.equip, EQUIP)}
   <p class="lbl">What you log</p>${chips('exf-track', Object.keys(TRACKS), d.track, TRACKS)}
   <button class="toggle ${d.perSide ? 'on' : ''}" aria-pressed="${!!d.perSide}" data-act="exf-side"><span class="box" aria-hidden="true"></span><span>Each side (one arm or leg at a time)</span></button>
+  ${d.track === 'cardio' ? `<button class="toggle ${d.damper ? 'on' : ''}" aria-pressed="${!!d.damper}" data-act="exf-damper"><span class="box" aria-hidden="true"></span><span>Has a damper setting (rower, SkiErg, bike)</span></button>` : ''}
   ${isStation(d) ? '<p class="hint">Machines and cables get their weight stack from each gym\'s stations.</p>' : ''}
   ${used.length ? `<p class="hint">Used in ${used.map(esc).join(', ')}.</p>` : ''}
   <div class="end">
@@ -1343,7 +1398,7 @@ async function connectSync() {
 }
 
 // ---------- backups and programme files ----------
-const DATA_KEYS = ['last', 'start', 'bests', 'series', 'prs', 'sessions', 'tested', 'lastWorkout', 'gym', 'outbox', 'tempos'];
+const DATA_KEYS = ['last', 'start', 'bests', 'series', 'prs', 'sessions', 'tested', 'lastWorkout', 'gym', 'outbox', 'tempos', 'history', 'dampers'];
 
 function saveBackup() {
   const out = { app: 'repsheet', kind: 'backup', version: VERSION, savedAt: new Date().toISOString(), db };
@@ -1363,7 +1418,8 @@ async function readDataFile(file) {
   if (!file) return;
   let f = null;
   try { f = JSON.parse(await file.text()); } catch { /* not JSON, caught below */ }
-  const ok = f?.app === 'repsheet' && (f.kind === 'programme' ? f.workouts && f.order?.length : f.kind === 'backup' && f.db?.workouts && f.db?.gyms?.length);
+  const programme = (Object.keys(f?.workouts || {}).length || f?.sessions?.length) && (db.real || f?.order?.length);
+  const ok = f?.app === 'repsheet' && (f.kind === 'programme' ? programme : f.kind === 'backup' && f.db?.workouts && f.db?.gyms?.length);
   if (!ok) { toast("That's not a repsheet file"); return; }
   state.sheet = { kind: 'data', file: f, clear: false };
   renderSheet();
@@ -1375,15 +1431,21 @@ function loadDataFile({ file: f, clear }) {
     for (const k of DATA_KEYS) { if (f[k] != null) store.set(k, f[k]); else store.del(k); }
     store.set('notice', 'Backup restored');
   } else {
-    for (const id of Object.keys(WORKOUTS)) delete db.workouts[id];
-    Object.assign(db.exercises, f.exercises);
-    Object.assign(db.workouts, f.workouts);
-    db.order = [...f.order, ...db.order.filter((id) => db.workouts[id] && !f.order.includes(id))];
-    db.real = Date.now();
+    // The first file replaces the sample routines. Later files update routines with the same id and keep the rest.
+    const first = !db.real;
+    const order = f.order || Object.keys(f.workouts || {});
+    if (first) for (const id of Object.keys(WORKOUTS)) delete db.workouts[id];
+    Object.assign(db.exercises, f.exercises || {});
+    Object.assign(db.workouts, f.workouts || {});
+    db.order = first
+      ? [...order, ...db.order.filter((id) => db.workouts[id] && !order.includes(id))]
+      : [...db.order.filter((id) => db.workouts[id]), ...order.filter((id) => db.workouts[id] && !db.order.includes(id))];
+    if (first) db.real = Date.now();
     saveDb();
-    store.set('start', { ...startMap, ...f.start });
-    if (clear) for (const k of DATA_KEYS) if (k !== 'start' && k !== 'gym') store.del(k);
-    store.set('notice', 'Routines loaded');
+    if (f.start) store.set('start', { ...startMap, ...f.start });
+    if (clear && first) for (const k of DATA_KEYS) if (k !== 'start' && k !== 'gym') store.del(k);
+    if (f.sessions?.length) mergeHistory(f.sessions);
+    store.set('notice', first ? 'Routines loaded' : 'Update loaded');
   }
   location.reload();
 }
@@ -1404,8 +1466,15 @@ function dataSheet(sh) {
       <p class="hint">From ${shortDate(f.savedAt)}. It replaces everything on this phone.</p>
       <button class="primary wide" data-act="data-load">Restore it</button>`;
   }
-  const names = f.order.map((id) => f.workouts[id]?.name).filter(Boolean);
+  const names = (f.order || Object.keys(f.workouts || {})).map((id) => f.workouts?.[id]?.name).filter(Boolean);
   const weights = Object.keys(f.start || {}).length;
+  const past = f.sessions?.length || 0;
+  if (db.real) {
+    const what = [names.length ? `Updates ${names.map(esc).join(', ')}.` : '', past ? `Adds ${past} past session${past === 1 ? '' : 's'} to your history.` : ''].filter(Boolean).join(' ');
+    return `<h2>Load this update?</h2>
+    <p class="hint">${what} Everything else stays as it is.</p>
+    <button class="primary wide" data-act="data-load">Load it</button>`;
+  }
   const saved = store.get('sessions', []).length;
   return `<h2>Load these routines?</h2>
     <p class="hint">${names.map(esc).join(', ')}${weights ? `, with starting weights for ${weights} exercises` : ''}. They replace the sample routines. Your gyms stay as they are.</p>
@@ -1444,9 +1513,213 @@ function renderSheet() {
     body = exNoteSheet(sh);
   } else if (sh.kind === 'dur') {
     body = durSheet();
+  } else if (sh.kind === 'damper') {
+    body = damperSheet(sh);
   }
   el.className = 'on';
   el.innerHTML = `<div class="sheet-back" data-act="sheet-close"></div><div class="sheet-panel" role="dialog" aria-modal="true">${body}<button class="ghost wide" data-act="sheet-close">Close</button></div>`;
+}
+
+// ---------- history screens ----------
+const dayText = (ms) => new Date(ms).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+const minsOf = (h) => Math.max(1, Math.round(((h.endedAt || h.startedAt) - h.startedAt) / 60000));
+
+function historyScreen() {
+  const list = histList().reverse();
+  const legacy = store.get('sessions', []).filter((x) => !list.some((h) => h.startedAt === x.startedAt)).reverse();
+  const rows = list.map((h) => {
+    const st = sessionStats(h);
+    return `<button class="other hrow" data-act="hist-open" data-h="${h.startedAt}"><span class="o-name">${esc(h.name)}</span><span class="o-focus">${dayText(h.startedAt)}, ${esc(gymById(h.gymId).name)}, ${minsOf(h)} min, ${st.sets} sets${st.volume ? `, ${st.volume.toLocaleString('en-AU')} kg` : ''}</span></button>`;
+  }).join('');
+  const old = legacy.map((x) => `<div class="other hrow legacy"><span class="o-name">${esc(db.workouts[x.workoutId]?.name || 'Workout')}</span><span class="o-focus">${dayText(x.startedAt)}. Saved before history, so its sets aren't on this phone.</span></div>`).join('');
+  return `
+  <header class="top">${brand()}</header>
+  <h1 class="page">History</h1>
+  ${rows || old ? `<p class="hint">Tap a session to see it or fix it. Changes go to your Sheet too.</p>${rows}${old}` : '<p class="hint">Sessions you save show up here.</p>'}
+  ${tabs()}`;
+}
+
+function histScreen() {
+  const h = histList().find((x) => x.startedAt === state.histId);
+  if (!h) { state.screen = 'history'; return historyScreen(); }
+  const blocks = h.blocks.map((b, bi) => {
+    if (!b.items) return `<section class="hblock"><h3><span class="tag">${letter(bi)}</span>${esc(circuitTitle(b))}</h3><p class="meta">${esc(b.c.status === 'idle' && !b.c.rounds ? 'Not done' : circuitView(b).big)}</p></section>`;
+    return b.items.map((it, ii) => {
+      const ex = exOf(it.exId);
+      let w = 0;
+      const sets = it.sets.filter((x) => x.done).map((x) => {
+        const n = x.type === 'warmup' ? 'W' : x.type === 'drop' ? '↓' : String(++w);
+        const extra = [x.tempo ? `tempo ${esc(x.tempo)}` : '', x.type === 'failure' ? 'to failure' : ''].filter(Boolean).join(', ');
+        const pace = ex.track === 'cardio' ? L.pace(x.time, x.dist, ex.split || 1000) : '';
+        return `<li><span class="n">${n}</span>${esc(setText(x, ex.track))}${pace ? `, ${pace}` : ''}${extra ? `, ${extra}` : ''}${(x.note || '').trim() ? `<span class="sn">${esc(x.note.trim())}</span>` : ''}</li>`;
+      }).join('');
+      const meta = [it.from ? `Swapped from ${esc(exOf(it.from).name)}` : '', it.damper ? `Damper ${it.damper}` : ''].filter(Boolean).join('. ');
+      return `<section class="hblock"><h3><span class="tag">${b.type === 'superset' ? `${letter(bi)}${ii + 1}` : letter(bi)}</span>${esc(ex.name)}</h3>
+        ${meta ? `<p class="meta">${meta}</p>` : ''}
+        ${sets ? `<ol class="hsets">${sets}</ol>` : '<p class="meta">No sets logged</p>'}
+        ${(it.note || '').trim() ? `<p class="ex-note">${esc(it.note.trim())}</p>` : ''}</section>`;
+    }).join('');
+  }).join('');
+  const feel = h.feel ? `, felt ${FEELS[h.feel - 1].toLowerCase()}` : '';
+  return `
+  <header class="top"><button class="ghost" data-act="nav" data-to="history">Back</button></header>
+  <h1 class="page">${esc(h.name)}</h1>
+  <p class="lede">${dayText(h.startedAt)}, ${esc(gymById(h.gymId).name)}. ${Sync.clock(h.startedAt)} to ${Sync.clock(h.endedAt || h.startedAt)}, ${minsOf(h)} min${feel}.</p>
+  ${blocks}
+  <div class="end"><button class="primary big" data-act="hist-edit">Edit this session</button></div>
+  ${tabs()}`;
+}
+
+function histEditScreen(s) {
+  const blocks = s.blocks.map((b, bi) => {
+    if (b.type === 'straight') return straightBlock(b, bi);
+    if (b.type === 'superset') return supersetBlock(b, bi);
+    return circuitBlock(b, bi);
+  }).join('');
+  const st = sessionStats(s);
+  return `
+  <header class="wtop">
+    <div><h1>Edit ${esc(s.name)}</h1><p class="sub">${dayText(s.startedAt)}, ${esc(gymById(s.gymId).name)}</p></div>
+    <button class="ghost" data-act="hist-cancel">Cancel</button>
+  </header>
+  <p class="tip">Fix any number, then tap Save changes. Untick a set to leave it out.</p>
+  ${blocks}
+  <div class="add-row center"><button class="ghost" data-act="add-ex">+ Add an exercise</button></div>
+  <dl class="stats">
+    <div class="tap" data-act="dur" role="button" tabindex="0" aria-label="Change workout time"><dt>Time <span class="edit">Edit</span></dt><dd>${minsOf(s)}<small> min</small></dd></div>
+    <div><dt>Sets</dt><dd>${st.sets}</dd></div>
+  </dl>
+  <h2 class="sec">How did it feel?</h2>
+  <div class="feel" role="radiogroup" aria-label="How did it feel">
+    ${FEELS.map((f, i) => `<button role="radio" aria-checked="${s.feel === i + 1}" class="${s.feel === i + 1 ? 'on' : ''}" data-act="feel" data-v="${i + 1}"><b>${i + 1}</b><span>${f}</span></button>`).join('')}
+  </div>
+  <div class="end">
+    <button class="primary big" data-act="hist-save">Save changes</button>
+    <button class="text-btn" data-act="hist-cancel">Cancel</button>
+  </div>`;
+}
+
+function damperSheet(sh) {
+  const it = state.session.blocks[sh.b].items[sh.i];
+  return `<h2>Damper</h2>
+    <p class="hint">${esc(exOf(it.exId).name)}. The app remembers it for next time.</p>
+    <div class="chips">${Array.from({ length: 10 }, (_, k) => k + 1).map((n) => `<button class="chip ${it.damper === n ? 'on' : ''}" aria-pressed="${it.damper === n}" data-act="damper-set" data-v="${n}">${n}</button>`).join('')}</div>`;
+}
+
+// A saved session without the parts that only matter while training.
+function compact(s, syncId) {
+  return {
+    syncId: syncId || s.syncId, workoutId: s.workoutId, name: s.name, gymId: s.gymId, startedAt: s.startedAt, endedAt: s.endedAt, feel: s.feel ?? null, prs: s.prs || [],
+    blocks: s.blocks.map((b) => (b.items
+      ? { type: b.type, rest: b.rest, rounds: b.rounds, items: b.items.map((it) => ({ exId: it.exId, from: it.from || null, key: it.key, rx: it.rx, note: it.note, damper: it.damper, sets: it.sets })) }
+      : { type: b.type, def: b.def, c: b.c })),
+  };
+}
+
+function openHistEdit(h) {
+  const c = clone(h);
+  c.blocks = c.blocks.map((b) => (b.items ? { ...b, items: b.items.map((it) => ({ ...it, last: null, hint: null, target: null })) } : b));
+  state.session = { v: 2, id: `${Sync.localDate(h.startedAt)}-${h.workoutId}`, ...c, bests: clone(state.bests), changed: false, keep: false };
+  state.histEdit = { hid: h.startedAt };
+  state.screen = 'workout';
+  renderScreen();
+}
+
+// Bests from every saved session before this one, then the PRs this one set.
+function prsFor(h, list) {
+  const bests = {};
+  const day = Sync.localDate(h.startedAt);
+  for (const x of list) {
+    if (x.startedAt >= h.startedAt) continue;
+    for (const it of itemsOf(x)) for (const set of it.sets) if (set.done && set.type !== 'warmup') applyBest(bests, it.key, set, exOf(it.exId).track);
+  }
+  for (const t of store.get('tested', [])) if (t.d < day) applyBest(bests, t.key, { kg: t.kg, reps: t.reps }, 'kgReps');
+  const prs = [];
+  for (const it of itemsOf(h)) {
+    const ex = exOf(it.exId);
+    for (const set of it.sets) {
+      if (!set.done || set.type === 'warmup') continue;
+      const hits = applyBest(bests, it.key, set, ex.track);
+      if (hits.length) prs.push({ key: it.key, exId: it.exId, name: ex.name, set: { kg: set.kg, reps: set.reps, extra: set.extra, time: set.time, dist: set.dist }, track: ex.track, hits });
+    }
+  }
+  return prs;
+}
+
+// Last time, bests and graph points for these exercises, worked out again from history.
+function rebuildDerived(keys) {
+  const list = histList();
+  const bests = store.get('bests', {});
+  const series = store.get('series', {});
+  const tested = store.get('tested', []);
+  for (const key of keys) {
+    const b = {};
+    const points = [];
+    let last = null;
+    for (const h of list) {
+      for (const it of itemsOf(h)) {
+        if (it.key !== key) continue;
+        const track = exOf(it.exId).track;
+        for (const set of it.sets) if (set.done && set.type !== 'warmup') applyBest(b, key, set, track);
+        const work = workSets(it.sets);
+        if (work.length) last = work.map(({ kg, reps, extra, time, dist, cal }) => ({ kg, reps, extra, time, dist, cal }));
+        const top = Math.max(0, ...work.map((x) => L.e1rm(x.kg, totalReps(x))));
+        if (top) points.push({ d: Sync.localDate(h.startedAt), e: top });
+      }
+    }
+    for (const t of tested) if (t.key === key) applyBest(b, key, { kg: t.kg, reps: t.reps }, 'kgReps');
+    if (b[key]?.e1rm || b[key]?.time || b[key]?.heaviest) bests[key] = b[key]; else delete bests[key];
+    if (points.length) series[key] = points; else delete series[key];
+    if (last) lastMap[key] = last;
+  }
+  store.set('bests', bests);
+  store.set('series', series);
+  store.set('last', lastMap);
+  state.bests = loadBests();
+}
+
+function mergeHistory(incoming) {
+  const list = histList();
+  const sums = store.get('sessions', []);
+  const keys = new Set();
+  for (const h of incoming) {
+    const sum = sums.find((x) => x.workoutId === h.workoutId && Math.abs(x.startedAt - h.startedAt) < 120000);
+    if (sum) { h.startedAt = sum.startedAt; Object.assign(sum, { endedAt: h.endedAt, feel: h.feel, stats: sessionStats(h) }); }
+    else sums.push({ id: `${Sync.localDate(h.startedAt)}-${h.workoutId}`, workoutId: h.workoutId, gymId: h.gymId, startedAt: h.startedAt, endedAt: h.endedAt, feel: h.feel, stats: sessionStats(h), prs: (h.prs || []).length });
+    const i = list.findIndex((x) => x.startedAt === h.startedAt);
+    if (i >= 0) list[i] = h; else list.push(h);
+    keysOf(h).forEach((k) => keys.add(k));
+  }
+  setHistory(list);
+  store.set('sessions', sums.sort((a, b) => a.startedAt - b.startedAt));
+  rebuildDerived(keys);
+}
+
+function saveHistoryEdit() {
+  const s = state.session;
+  const list = histList();
+  const i = list.findIndex((h) => h.startedAt === state.histEdit.hid);
+  if (i < 0) { toast("Couldn't find that session"); return; }
+  const before = list[i];
+  const fresh = compact(s, before.syncId);
+  fresh.prs = prsFor(fresh, list);
+  list[i] = fresh;
+  setHistory(list);
+  rebuildDerived(new Set([...keysOf(before), ...keysOf(fresh)]));
+  const sums = store.get('sessions', []);
+  const sum = sums.find((x) => x.startedAt === fresh.startedAt);
+  if (sum) Object.assign(sum, { endedAt: fresh.endedAt, feel: fresh.feel, stats: sessionStats(fresh), prs: fresh.prs.length });
+  store.set('sessions', sums);
+  const message = Sync.sessionMessage({ ...s, prs: fresh.prs, syncId: fresh.syncId }, syncHelpers());
+  state.session = null;
+  state.histEdit = null;
+  state.rest = null;
+  renderRest();
+  state.histId = fresh.startedAt;
+  state.screen = 'hist';
+  queueSync(message);
+  renderScreen();
+  toast(store.get('sync', null) ? 'Saved, and the fix is on its way to your Sheet' : 'Saved on this phone');
 }
 
 function closeSheet() {
@@ -1460,11 +1733,12 @@ let lastScreen = null;
 function renderScreen() {
   const views = {
     today: todayScreen, workout: workoutScreen, summary: summaryScreen, prs: prsScreen, detail: detailScreen, test: testScreen,
-    exercises: exercisesScreen, 'ex-edit': exEditScreen, 'gym-edit': gymEditScreen, edit: editScreen,
+    exercises: exercisesScreen, 'ex-edit': exEditScreen, 'gym-edit': gymEditScreen, edit: editScreen, history: historyScreen, hist: histScreen,
   };
   const y = window.scrollY;
   $('#screen').innerHTML = views[state.screen]();
   document.body.dataset.screen = state.screen;
+  document.body.toggleAttribute('data-edit', !!state.histEdit);
   if (lastScreen === state.screen) window.scrollTo(0, y); else window.scrollTo(0, 0);
   lastScreen = state.screen;
   tick();
@@ -1484,7 +1758,7 @@ async function keepAwake(on) {
   } catch { /* not allowed right now */ }
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && (state.session || state.test?.stage === 'run')) keepAwake(true);
+  if (document.visibilityState === 'visible' && ((state.session && !state.histEdit) || state.test?.stage === 'run')) keepAwake(true);
 });
 
 // ---------- timers ----------
@@ -1574,6 +1848,7 @@ function onTick(row) {
   if (ex.track === 'kgReps' && !set.reps) { toast('Add your reps first'); return; }
   set.done = true;
   vibrate(40);
+  if (state.histEdit) { renderScreen(); return; }
   if (set.type !== 'warmup') {
     const hits = applyBest(s.bests, item.key, set, ex.track);
     if (hits.length) {
@@ -1584,9 +1859,10 @@ function onTick(row) {
   const next = nextLabel(bi);
   if (b.type === 'straight') {
     const nextIsDrop = item.sets[si + 1]?.type === 'drop';
-    if (!nextIsDrop && next) startRest(set.type === 'warmup' ? 90 : b.rest, next);
+    const rest = set.type === 'warmup' ? 90 : b.rest;
+    if (!nextIsDrop && next && rest) startRest(rest, next);
   } else if (b.type === 'superset') {
-    if (ii === b.items.length - 1) { if (next) startRest(b.rest, next); } else toast(`Straight into ${letter(bi)}${ii + 2}: ${exOf(b.items[ii + 1].exId).name}`);
+    if (ii === b.items.length - 1) { if (next && b.rest) startRest(b.rest, next); } else toast(`Straight into ${letter(bi)}${ii + 2}: ${exOf(b.items[ii + 1].exId).name}`);
   }
   persist();
   renderScreen();
@@ -1594,10 +1870,10 @@ function onTick(row) {
 
 function onSetInput(el) {
   const raw = el.value.replace(',', '.').trim();
-  const num = raw === '' ? null : Number(raw);
-  if (raw !== '' && Number.isNaN(num)) { toast('Numbers only'); renderScreen(); return; }
-  const row = el.closest('.set');
   const f = el.closest('.field').dataset.f;
+  const num = raw === '' ? null : f === 'time' ? L.parseTime(raw) : Number(raw);
+  if (raw !== '' && Number.isNaN(num)) { toast(f === 'time' ? 'Type the time as 65 or 1:05' : 'Numbers only'); renderScreen(); return; }
+  const row = el.closest('.set');
   const { set, item, si } = setFromRow(row);
   if (f === 'kg') {
     const old = set.kg;
@@ -1643,6 +1919,10 @@ function saveSession() {
   for (const b of s.blocks) for (const it of b.items || []) for (const x of it.sets) if (x.done && x.tempo) tempos[x.tempo] = (tempos[x.tempo] || 0) + 1;
   store.set('tempos', tempos);
   const message = Sync.sessionMessage(s, syncHelpers());
+  setHistory([...histList(), compact(s, message.id)]);
+  const dampers = store.get('dampers', {});
+  for (const it of s.blocks.flatMap((b) => b.items || [])) if (it.damper != null) dampers[it.exId] = it.damper;
+  store.set('dampers', dampers);
   if (s.keep && db.workouts[s.workoutId]) { db.workouts[s.workoutId] = sessionToTemplate(s, db.workouts[s.workoutId]); saveDb(); }
   store.set('lastWorkout', s.workoutId);
   state.bests = clone(s.bests);
@@ -1795,6 +2075,17 @@ function onAction(el) {
     case 'exnote': state.sheet = { kind: 'exnote', b: +el.dataset.b, i: +el.dataset.i }; renderSheet(); $('#sheet textarea')?.focus(); break;
     case 'ex-note-del': { const sh = state.sheet; delete s.blocks[sh.b].items[sh.i].note; persist(); closeSheet(); toast('Note deleted'); break; }
     case 'dur': state.sheet = { kind: 'dur' }; renderSheet(); break;
+    case 'damper': state.sheet = { kind: 'damper', b: +el.dataset.b, i: +el.dataset.i }; renderSheet(); break;
+    case 'damper-set': { const sh = state.sheet; s.blocks[sh.b].items[sh.i].damper = Number(el.dataset.v); persist(); closeSheet(); break; }
+    case 'hist-open': state.histId = Number(el.dataset.h); state.screen = 'hist'; renderScreen(); break;
+    case 'hist-edit': {
+      if (state.session) { toast('Finish or discard the workout you have going first'); break; }
+      const h = histList().find((x) => x.startedAt === state.histId);
+      if (h) openHistEdit(h);
+      break;
+    }
+    case 'hist-save': saveHistoryEdit(); break;
+    case 'hist-cancel': state.session = null; state.histEdit = null; state.rest = null; renderRest(); state.screen = 'hist'; renderScreen(); toast('Nothing changed'); break;
     case 'dur-step': setDuration(Math.round((s.endedAt - s.startedAt) / 60000) + Number(el.dataset.d)); renderSheet(); renderScreen(); break;
     case 'add-set': {
       const it = s.blocks[+el.dataset.b].items[0];
@@ -1908,6 +2199,7 @@ function onAction(el) {
     case 'exf-equip': state.exDraft.equip = el.dataset.v; renderScreen(); break;
     case 'exf-track': state.exDraft.track = el.dataset.v; renderScreen(); break;
     case 'exf-side': state.exDraft.perSide = !state.exDraft.perSide; renderScreen(); break;
+    case 'exf-damper': state.exDraft.damper = !state.exDraft.damper; renderScreen(); break;
     case 'ex-cancel': {
       const p = state.pending; state.pending = null;
       state.screen = p ? p.screen : 'exercises'; renderScreen();
@@ -2087,6 +2379,7 @@ function onAction(el) {
       }
       store.set('tested', tested); store.set('prs', saved);
       const message = Sync.testMessage(t, syncHelpers());
+      if (isReal()) store.set('bests', t.bests);
       state.bests = loadBests(); state.test = null; keepAwake(false); persist();
       state.screen = 'prs'; queueSync(message); renderScreen(); toast('PR session saved'); break;
     }

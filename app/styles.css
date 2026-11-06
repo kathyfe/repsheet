@@ -156,7 +156,7 @@ button:disabled { cursor: default; }
 
 .tabs {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: repeat(4, 1fr);
   background: var(--mat);
   border-top: 1px solid var(--line);
   padding-bottom: env(safe-area-inset-bottom);
@@ -214,6 +214,20 @@ button:disabled { cursor: default; }
 .ex-note { margin: 8px 0 4px 50px; width: calc(100% - 50px); }
 .ss-item .ex-note { margin: 6px 0 0; width: 100%; }
 .note-add { margin-top: 6px; }
+.fields.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pace { grid-column: 2 / 4; font-size: 13px; color: var(--dust); margin-top: 2px; }
+body[data-edit] .set.done .field { opacity: 1; }
+.hrow { width: 100%; }
+.hrow.legacy { opacity: 0.6; }
+.hblock { padding: 14px 0; border-top: 1px solid var(--line); }
+.hblock h3 { font: 700 20px/1.1 var(--num); display: flex; gap: 10px; align-items: baseline; }
+.hblock h3 .tag { color: var(--dust); min-width: 28px; }
+.hblock .meta { color: var(--dust); font-size: 13px; margin: 2px 0 0 38px; }
+.hsets { list-style: none; padding: 0; margin: 6px 0 0 38px; }
+.hsets li { padding: 3px 0; font-size: 15px; }
+.hsets .n { display: inline-block; min-width: 22px; color: var(--dust); font-weight: 600; }
+.hsets .sn { display: block; margin: 2px 0 0 22px; color: var(--dust); font-size: 14px; white-space: pre-wrap; }
+.hblock .ex-note { margin: 6px 0 0 38px; width: calc(100% - 38px); }
 .set.warmup .set-label, .set.drop .set-label { color: var(--dust); }
 .fields { display: grid; grid-template-columns: repeat(var(--n, 2), minmax(0, 1fr)); gap: 8px; }
 .field {

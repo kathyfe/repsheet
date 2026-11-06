@@ -12,7 +12,7 @@ export function isSyncUrl(url) {
 
 // One finished session: rows for the Sets, Sessions and PRs tabs.
 export function sessionMessage(s, h) {
-  const id = `${localDate(s.startedAt)}-${s.workoutId}-${idTime(s.startedAt)}`;
+  const id = s.syncId || `${localDate(s.startedAt)}-${s.workoutId}-${idTime(s.startedAt)}`;
   const date = localDate(s.startedAt);
   const gym = h.gymName(s.gymId);
   const sets = [];
@@ -21,7 +21,7 @@ export function sessionMessage(s, h) {
       it.sets.forEach((x, i) => {
         if (!x.done) return;
         sets.push([
-          date, id, s.name, gym, `${h.letter(bi)}${b.type === 'superset' ? ' (superset)' : ''}`, h.exName(it.exId), h.machine(it.exId, s.gymId),
+          date, id, s.name, gym, `${h.letter(bi)}${b.type === 'superset' ? ' (superset)' : ''}`, h.exName(it.exId), it.damper ? `damper ${it.damper}` : h.machine(it.exId, s.gymId),
           i + 1, x.type, x.kg ?? '', x.reps ?? '', x.time ?? '', x.dist ?? '', x.cal ?? '', x.tempo ?? '', '',
           it.from ? h.exName(it.from) : '', [x.extra ? `then ${x.extra} to failure` : '', (x.note || '').trim()].filter(Boolean).join('. '),
         ]);
