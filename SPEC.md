@@ -146,6 +146,13 @@ Status: draft for Kathy's review, 20 Oct 2026.
 - **Statuses:** new (one session), ready to go up (4 solid sessions in a row), building (every rep hit last time), missed reps, stalled (missed reps in 3 of the last 6 sessions at the same weight), cardio, logged.
 - "Send now" also resends the summary. The script needs redeploying once to write the new tabs; until then it ignores them.
 
+### Prototype 0.8 (7 Nov 2026)
+- **PR page from real history.** Every lift with logged weight shows up, grouped by muscle, with an estimated 1RM next to the heaviest weight actually lifted. Estimates carry a ≈ and sit in grey; lifted numbers are solid. Machines and cables count per gym.
+- **Estimated 1RM:** Epley (Lyfta's default), from the best set. Sets of 13 to 15 reps are marked rough; sets over 15 reps and 21s give no estimate.
+- **Lift page:** estimated 1RM with the set it came from, heaviest lifted, a real 1RM only when tested in a PR session or logged as a single, the graph from the second session, and rep records for 1, 3, 5, 8, 10, 12 and 15 reps: the heaviest weight lifted for at least that many reps next to what the estimate suggests.
+- **21s.** A set option: bottom half, top half, full reps, logged as the total (21 = 7 + 7 + 7). The set shows a 21s bubble with the split, the target becomes 21, and the next session starts as 21s again until switched back. 21s stay out of 1RMs and PRs. The Sheet gets them in set_type, e.g. "working, 21s (7+7+7)", so the script needs no change.
+- **PR fix.** A lift's first session sets the baseline, so beating an earlier set the same day no longer counts as a PR. Saved bests are worked out again once from history on update.
+
 ## 4. Not in the MVP
 
 - Watch app, heart rate, Google Health sync (Google's API isn't open to new projects yet).
@@ -170,7 +177,7 @@ One Sheet, `repsheet log`, in Kat OS Files on Google Drive. Flat rows so the Hea
 | exercise | Barbell RDL |
 | machine | (cable or machine name, blank for free weights) |
 | set_no | 3 |
-| set_type | working |
+| set_type | working (or warmup, drop, failure, attempt; 21s add ", 21s (7+7+7)") |
 | kg | 70 |
 | reps | 8 |
 | time_s | |

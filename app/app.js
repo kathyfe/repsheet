@@ -4,7 +4,7 @@ import {
 import * as L from './logic.js';
 import * as Sync from './sync.js';
 
-const VERSION = 'prototype 0.7';
+const VERSION = 'prototype 0.8';
 
 // ---------- small helpers ----------
 const $ = (sel) => document.querySelector(sel);
@@ -56,17 +56,23 @@ const itemsOf = (h) => h.blocks.flatMap((b) => b.items || []);
 const keysOf = (h) => new Set(itemsOf(h).map((it) => it.key));
 const workSets = (sets) => sets.filter((x) => x.done && (x.type === 'working' || x.type === 'failure'));
 
-// Solid sessions in a row at the same top weight, newest first, where every working set hit the reps.
-function solidCount(key, reps) {
+// 21s count as their own thing: they set the target at 21 reps and stay out of every 1RM and PR sum.
+const is21 = (x) => x?.style === '21s';
+const styleOf = (sets) => (!sets?.length ? null : sets.every(is21) ? '21s' : sets.some(is21) ? 'mixed' : null);
+const goalReps = (x, reps) => (is21(x) ? L.TWENTY_ONES : reps);
+
+// Solid sessions in a row at the same top weight and style, newest first, where every working set hit the reps.
+function solidCount(key, reps, style = null) {
   if (!reps) return 0;
   let n = 0;
   let kg = null;
   for (const h of histList().reverse()) {
     const work = itemsOf(h).filter((it) => it.key === key).flatMap((it) => workSets(it.sets)).filter((x) => x.kg != null);
     if (!work.length) continue;
+    if (styleOf(work) !== style) break;
     const top = Math.max(...work.map((x) => x.kg));
     if (kg == null) kg = top; else if (top !== kg) break;
-    if (!work.every((x) => (x.reps ?? 0) + (x.extra ?? 0) >= reps)) break;
+    if (!work.every((x) => (x.reps ?? 0) + (x.extra ?? 0) >= goalReps(x, reps))) break;
     n += 1;
   }
   return n;
@@ -84,16 +90,20 @@ function defaultRx(exId) {
 }
 function doseOnly(rx) {
   const o = { ex: rx.ex };
-  for (const k of ['reps', 'time', 'distance', 'cal', 'tempo']) if (rx[k] != null) o[k] = rx[k];
+  for (const k of ['reps', 'time', 'distance', 'cal', 'tempo', 'style']) if (rx[k] != null) o[k] = rx[k];
   return o;
 }
 
 // ---------- bests and PRs ----------
 const REP_MARKS = [1, 3, 5, 8, 10];
+const RECORD_REPS = [1, 3, 5, 8, 10, 12, 15];
 const totalReps = (s) => (s.reps || 0) + (s.extra || 0);
+const setE1 = (x) => (is21(x) ? 0 : L.e1rm(x.kg, totalReps(x)));
+const hasBest = (b) => !!(b && (b.e1rm || b.time || b.heaviest));
 
 function applyBest(bests, key, s, track) {
   const hits = [];
+  if (is21(s)) return hits;
   const b = bests[key] || (bests[key] = { e1rm: 0, heaviest: null, repMax: {} });
   b.repMax ||= {};
   const had = !!(b.e1rm || b.time);
@@ -125,8 +135,10 @@ function applyBest(bests, key, s, track) {
   return hits;
 }
 
+// With real routines, saved bests already hold every PR and history can correct them, so old PR entries aren't replayed.
 function loadBests() {
-  const b = isReal() ? store.get('bests', {}) : clone(BEST);
+  if (isReal()) return store.get('bests', {});
+  const b = clone(BEST);
   for (const p of store.get('prs', [])) applyBest(b, p.key, p.set, p.track);
   return b;
 }
@@ -172,7 +184,7 @@ function nextWorkoutId() {
 
 // ---------- building a session ----------
 function newSet(type, v = {}) {
-  return { type, kg: v.kg ?? null, reps: v.reps ?? null, time: v.time ?? null, dist: v.dist ?? null, cal: v.cal ?? null, tempo: v.tempo ?? null, extra: v.extra ?? 0, done: false };
+  return { type, kg: v.kg ?? null, reps: v.reps ?? null, time: v.time ?? null, dist: v.dist ?? null, cal: v.cal ?? null, tempo: v.tempo ?? null, extra: v.extra ?? 0, style: v.style ?? null, done: false };
 }
 
 function startTarget(exId, steps) {
@@ -200,8 +212,11 @@ function buildItem(rx, gymId, rounds) {
       if (l?.length) { hint = { gym: g.name, kg: Math.max(...l.map((s) => s.kg || 0)) }; break; }
     }
   }
+  // 21s carry on from last time (or the routine), with 21 reps as the goal, until she switches back.
+  const style = ex.track === 'kgReps' ? (rx.style || (styleOf(last) === '21s' ? '21s' : null)) : null;
+  const goal = style === '21s' ? L.TWENTY_ONES : rx.reps;
   const target = ex.track === 'kgReps' || ex.track === 'kgDistance'
-    ? L.nextTarget(last, ex.track === 'kgReps' ? rx.reps : null, steps, ex.track === 'kgReps' ? solidCount(key, rx.reps) : 0) ?? (hint ? null : startTarget(rx.ex, steps))
+    ? L.nextTarget(last, ex.track === 'kgReps' ? goal : null, steps, ex.track === 'kgReps' ? solidCount(key, goal, style) : 0) ?? (hint ? null : startTarget(rx.ex, steps))
     : null;
   const n = rounds || rx.sets || 3;
   const sets = [];
@@ -211,16 +226,17 @@ function buildItem(rx, gymId, rounds) {
   for (let i = 0; i < n; i++) {
     sets.push(newSet('working', {
       kg: target?.kg ?? null,
-      reps: rx.reps ?? null,
+      reps: goal ?? null,
       time: ex.track === 'cardio' ? null : rx.time ?? last?.[0]?.time ?? null,
       dist: rx.distance ?? last?.[0]?.dist ?? null,
       cal: rx.cal ?? null,
       tempo: rx.tempo || null,
+      style,
     }));
   }
   if (rx.dropLast && !rounds) sets.push(newSet('drop', { kg: dropKg(target?.kg, steps), reps: rx.reps ?? null }));
   const damper = ex.damper ? store.get('dampers', {})[rx.ex] ?? null : undefined;
-  return { exId: rx.ex, from: null, rx: clone(rx), key, last, hint, target, sets, damper };
+  return { exId: rx.ex, from: null, rx: clone(rx), key, last, hint, target, sets, damper, goal };
 }
 
 function freshCircuit() {
@@ -239,7 +255,7 @@ function buildSession(tpl, workoutId, gymId) {
     id: `${new Date().toISOString().slice(0, 10)}-${workoutId}`,
     workoutId, name: tpl.name, gymId, startedAt: Date.now(), endedAt: null, feel: null,
     blocks: tpl.blocks.map((b) => buildBlock(b, gymId)),
-    bests: clone(state.bests), prs: [], changed: false, keep: false,
+    bests: clone(state.bests), known: Object.keys(state.bests).filter((k) => hasBest(state.bests[k])), prs: [], changed: false, keep: false,
   };
 }
 
@@ -249,9 +265,10 @@ function sessionToTemplate(s, base) {
     blocks: s.blocks.map((b) => {
       if (b.type === 'straight') {
         const it = b.items[0];
-        const working = it.sets.filter((x) => x.type === 'working' || x.type === 'failure').length || 1;
-        const rx = { ...it.rx, ex: it.exId, sets: working, rest: b.rest };
+        const work = it.sets.filter((x) => x.type === 'working' || x.type === 'failure');
+        const rx = { ...it.rx, ex: it.exId, sets: work.length || 1, rest: b.rest };
         if (it.sets.some((x) => x.type === 'drop')) rx.dropLast = true; else delete rx.dropLast;
+        if (styleOf(work) === '21s') rx.style = '21s'; else delete rx.style;
         return { type: 'straight', items: [rx] };
       }
       if (b.type === 'superset') return { type: 'superset', rounds: b.rounds, rest: b.rest, items: b.items.map((it) => ({ ...doseOnly(it.rx), ex: it.exId })) };
@@ -289,7 +306,7 @@ function circuitSub(b) {
 
 function workoutSummary(w) {
   return w.blocks.map((b) => {
-    const dose = (rx, n) => { const ex = exOf(rx.ex); return `${ex.name} ${doseOf(rx, ex, n)}${rx.tempo ? `, tempo ${rx.tempo}` : ''}${rx.dropLast ? ', drop set on the last' : ''}`; };
+    const dose = (rx, n) => { const ex = exOf(rx.ex); return `${ex.name} ${doseOf(rx, ex, n)}${rx.style === '21s' ? ' as 21s' : ''}${rx.tempo ? `, tempo ${rx.tempo}` : ''}${rx.dropLast ? ', drop set on the last' : ''}`; };
     if (b.type === 'straight') return dose(b.items[0], b.items[0].sets);
     if (b.type === 'superset') return `Superset: ${b.items.map((rx) => dose(rx, b.rounds)).join(' + ')}`;
     return `${circuitTitle(b)}${b.title && b.rounds ? `, ${roundsText(b.rounds)}` : ''}: ${b.items.map((m) => `${m.text}${m.detail ? ` (${m.detail})` : ''}`).join(', ')}`;
@@ -300,9 +317,11 @@ function cardioText(s) {
   return `${s.dist ?? '–'} m${s.time ? ` in ${L.fmtTime(s.time)}` : ''}${s.cal ? `, ${s.cal} cal` : ''}`;
 }
 
+const style21 = (s) => (is21(s) ? `, 21s${L.thirds(s.reps) ? ` (${L.thirds(s.reps)})` : ''}` : '');
+
 function setText(s, track) {
   const extra = s.extra ? ` + ${s.extra} to failure` : '';
-  if (track === 'kgReps') return `${L.fmtKg(s.kg)} kg × ${s.reps}${extra}`;
+  if (track === 'kgReps') return `${L.fmtKg(s.kg)} kg × ${s.reps}${extra}${style21(s)}`;
   if (track === 'time') return `${s.time} s`;
   if (track === 'kgDistance') return `${L.fmtKg(s.kg)} kg for ${s.dist} m`;
   if (track === 'distance') return `${s.dist} m`;
@@ -330,12 +349,14 @@ function lastLine(item, gymId) {
     if (ex.track === 'kgReps') {
       const same = last.every((s) => s.kg === last[0].kg);
       const reps = (s) => `${s.reps}${s.extra ? `+${s.extra}` : ''}`;
+      const as21 = styleOf(last) === '21s' ? ' as 21s' : '';
+      const goal = item.goal ?? item.rx.reps;
       bits.push(same
-        ? `Last time ${L.fmtKg(last[0].kg)} kg × ${last.map(reps).join(', ')}.`
-        : `Last time ${last.map((s) => `${L.fmtKg(s.kg)} × ${reps(s)}`).join(', ')}.`);
+        ? `Last time ${L.fmtKg(last[0].kg)} kg × ${last.map(reps).join(', ')}${as21}.`
+        : `Last time ${last.map((s) => `${L.fmtKg(s.kg)} × ${reps(s)}`).join(', ')}${as21}.`);
       if (item.target?.bumped) bits.push(`<b class="up">Up to ${L.fmtKg(item.target.kg)} kg today</b>, after ${L.SOLID_SESSIONS} solid sessions.`);
-      else if (item.rx.reps && !item.target?.hitAll) bits.push(`Same weight until every set hits ${item.rx.reps}.`);
-      else if (item.rx.reps) bits.push(`${item.target.solid} of ${L.SOLID_SESSIONS} solid sessions at ${L.fmtKg(item.target.kg)} kg before going up.`);
+      else if (goal && !item.target?.hitAll) bits.push(`Same weight until every set hits ${goal}${goal === L.TWENTY_ONES && item.sets.some(is21) ? ` (${L.thirds(goal)})` : ''}.`);
+      else if (goal) bits.push(`${item.target.solid} of ${L.SOLID_SESSIONS} solid sessions at ${L.fmtKg(item.target.kg)} kg before going up.`);
     } else if (ex.track === 'time') bits.push(`Last time ${last.map((s) => s.time).join(', ')} s.`);
     else if (ex.track === 'kgDistance') bits.push(`Last time ${L.fmtKg(last[0].kg)} kg for ${last[0].dist} m.`);
     else if (ex.track === 'distance') bits.push(`Last time ${last.map((s) => s.dist).join(', ')} m.`);
@@ -430,6 +451,7 @@ function setRow(bi, ii, si, s, item, label) {
   if (t === 'calories' || t === 'cardio') f.push(field('cal', s.cal, 'numeric', 'cal', 'calories', lock));
   const pace = t === 'cardio' ? L.pace(s.time, s.dist, ex.split || 1000) : '';
   const bubbles = [];
+  if (is21(s)) bubbles.push(`<button class="bubble" data-act="setopts" data-focus="style" aria-label="Change 21s">21s${L.thirds(s.reps) ? ` · ${L.thirds(s.reps)}` : ''}</button>`);
   if (s.tempo) bubbles.push(`<button class="bubble" data-act="setopts" data-focus="tempo" aria-label="Change tempo">Tempo ${esc(s.tempo)}</button>`);
   if (s.extra) bubbles.push(`<button class="bubble" data-act="setopts" data-focus="extra" aria-label="Change reps to failure">+${s.extra} to failure</button>`);
   if (s.type === 'failure') bubbles.push('<button class="bubble" data-act="setopts">To failure</button>');
@@ -516,8 +538,8 @@ function todayScreen() {
 function straightBlock(b, bi) {
   const it = b.items[0];
   const ex = exOf(it.exId);
-  const working = it.sets.filter((s) => s.type !== 'warmup' && s.type !== 'drop').length;
-  const rx = [doseOf(it.rx, ex, working)];
+  const work = it.sets.filter((s) => s.type !== 'warmup' && s.type !== 'drop');
+  const rx = [styleOf(work) === '21s' ? `${work.length} × 21s (${L.thirds(L.TWENTY_ONES)})` : doseOf(it.rx, ex, work.length)];
   if (it.rx.tempo) rx.push(`tempo ${esc(it.rx.tempo)}`);
   if (b.rest) rx.push(`rest ${L.fmtRest(b.rest)}`);
   let w = 0;
@@ -789,7 +811,154 @@ function liftRow(key) {
   </button>`;
 }
 
+// ---------- PRs from real history: estimated next to lifted ----------
+// Every lift with logged weight, oldest first. Machines and cables count per gym, since stacks differ.
+function liftKeys() {
+  const keys = new Set();
+  for (const h of histList()) {
+    for (const it of itemsOf(h)) {
+      if (exOf(it.exId).track === 'kgReps' && it.sets.some((x) => x.done && x.type !== 'warmup' && x.kg)) keys.add(it.key);
+    }
+  }
+  for (const t of store.get('tested', [])) keys.add(t.key);
+  return [...keys];
+}
+
+// Estimated 1RM, heaviest lift, tested or logged singles and rep records for one lift, straight from history.
+function liftStats(key) {
+  const [exId, gymId] = key.split('@');
+  const o = { key, exId, gymId: gymId || null, est: null, heaviest: null, single: null, rec: {}, points: [], tested: [], n21: 0, sessions: 0 };
+  const lifted = (kg, reps, d, how) => {
+    if (!o.heaviest || kg > o.heaviest.kg || (kg === o.heaviest.kg && reps > o.heaviest.reps)) o.heaviest = { kg, reps, d };
+    for (const r of RECORD_REPS) if (reps >= r && kg > (o.rec[r]?.kg ?? 0)) o.rec[r] = { kg, reps, d, how };
+    if (reps === 1 && kg > (o.single?.kg ?? 0)) o.single = { kg, d, how };
+    const e = L.e1rm(kg, reps);
+    if (e > (o.est?.e ?? 0)) o.est = { e, kg, reps, d };
+    return e;
+  };
+  for (const h of histList()) {
+    const d = Sync.localDate(h.startedAt);
+    let top = 0;
+    let any = false;
+    for (const it of itemsOf(h)) {
+      if (it.key !== key) continue;
+      for (const x of it.sets) {
+        if (!x.done || x.type === 'warmup' || !x.kg || !totalReps(x)) continue;
+        any = true;
+        if (is21(x)) { o.n21 += 1; continue; }
+        top = Math.max(top, lifted(x.kg, totalReps(x), d, 'logged'));
+      }
+    }
+    if (any) o.sessions += 1;
+    if (top) o.points.push({ d, e: top });
+  }
+  for (const t of store.get('tested', [])) {
+    if (t.key !== key) continue;
+    o.tested.push(t);
+    lifted(t.kg, t.reps, t.d, 'tested');
+  }
+  return o;
+}
+
+const liftName = (o) => `${esc(exOf(o.exId).name)}${o.gymId ? `<small> · ${esc(gymById(o.gymId).name)}</small>` : ''}`;
+
+function liftRowReal(o) {
+  const rough = o.est && o.est.reps > L.ROUGH_ABOVE;
+  const est = o.est
+    ? `<span class="l-est"><b>≈${L.fmtKg(o.est.e)}</b><small>kg est. 1RM${rough ? ', rough' : ''}</small></span>`
+    : `<span class="l-est none"><small>${o.n21 ? 'Only 21s so far, so no estimate' : 'No estimate yet'}</small></span>`;
+  const act = o.single
+    ? `<span class="l-act"><b>${L.fmtKg(o.single.kg)}</b><small>kg 1RM ${o.single.how === 'tested' ? 'tested' : 'lifted'}</small></span>`
+    : o.heaviest ? `<span class="l-act"><b>${L.fmtKg(o.heaviest.kg)}</b><small>kg × ${o.heaviest.reps} lifted</small></span>` : '';
+  return `<button class="lift real" data-act="detail" data-k="${esc(o.key)}">
+    <span class="l-name">${liftName(o)}</span>
+    <span class="l-nums">${est}${act}</span>
+    ${sparkline(o.points)}
+  </button>`;
+}
+
+function prsScreenReal() {
+  const all = liftKeys().map(liftStats);
+  const groups = GROUPS.map((g) => {
+    const list = all.filter((o) => (exOf(o.exId).group || 'Other') === g).sort((a, b) => exOf(a.exId).name.localeCompare(exOf(b.exId).name));
+    return list.length ? `<h3 class="grp">${g}</h3><div class="lifts">${list.map(liftRowReal).join('')}</div>` : '';
+  }).join('');
+  return `
+  <header class="top">${brand()}</header>
+  <h1 class="page">PRs and progress</h1>
+  <div class="pr-cta">
+    <button class="primary big" data-act="test-setup">Start a PR session</button>
+    <p class="hint">Test a 1RM, 3RM or 5RM. Best done at the end of a block.</p>
+  </div>
+  <h2 class="sec">Your lifts</h2>
+  <p class="legend">Numbers with <b>≈</b> are estimated from your logged sets. The rest are weights you actually lifted. Tap a lift for its graph and rep records.</p>
+  ${groups || '<p class="hint">Log a session and your lifts show up here.</p>'}
+  ${weeksGrid()}
+  ${tabs()}`;
+}
+
+// Estimated 1RM over time, with tested maxes as diamonds. Needs two sessions to draw a line.
+function e1Chart(points, tested, name) {
+  if (points.length < 2) return `<p class="hint chart-wait">${points.length ? 'The graph starts after your second session with this lift.' : 'No estimate to graph yet.'}</p>`;
+  const W = 340; const H = 210; const padL = 36; const padR = 12; const padT = 16; const padB = 30;
+  const vals = [...points.map((p) => p.e), ...tested.map((t) => t.kg)];
+  const min = Math.floor(Math.min(...vals) - 2); const max = Math.ceil(Math.max(...vals) + 2);
+  const t0 = new Date(points[0].d).getTime(); const t1 = new Date(points[points.length - 1].d).getTime();
+  const x = (d) => padL + ((new Date(d).getTime() - t0) / Math.max(1, t1 - t0)) * (W - padL - padR);
+  const y = (v) => padT + (1 - (v - min) / (max - min)) * (H - padT - padB);
+  const line = points.map((p) => `${x(p.d).toFixed(1)},${y(p.e).toFixed(1)}`).join(' ');
+  const dots = points.map((p) => `<circle cx="${x(p.d)}" cy="${y(p.e)}" r="3" class="dot"/>`).join('');
+  const marks = tested.map((t) => `<g class="tested"><rect x="${x(t.d) - 5}" y="${y(t.kg) - 5}" width="10" height="10" transform="rotate(45 ${x(t.d)} ${y(t.kg)})"/><text x="${x(t.d) + 9}" y="${y(t.kg) + 16}">Tested ${L.fmtKg(t.kg)} × ${t.reps}</text></g>`).join('');
+  return `<figure class="chart">
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Estimated 1RM over time for ${esc(name)}">
+      <line x1="${padL}" x2="${W - padR}" y1="${y(max)}" y2="${y(max)}" class="grid"/>
+      <line x1="${padL}" x2="${W - padR}" y1="${y(min)}" y2="${y(min)}" class="grid"/>
+      <text x="${padL - 6}" y="${y(max) + 4}" text-anchor="end" class="axis">${max}</text>
+      <text x="${padL - 6}" y="${y(min) + 4}" text-anchor="end" class="axis">${min}</text>
+      <polyline points="${line}" class="trend"/>
+      ${dots}${marks}
+      <text x="${padL}" y="${H - 8}" class="axis">${shortDate(points[0].d)}</text>
+      <text x="${W - padR}" y="${H - 8}" text-anchor="end" class="axis">${shortDate(points[points.length - 1].d)}</text>
+    </svg>
+    <figcaption>Estimated 1RM in kg, from your best set each session. Red diamonds are maxes you tested in a PR session.</figcaption>
+  </figure>`;
+}
+
+function detailScreenReal(key) {
+  const o = liftStats(key);
+  const ex = exOf(o.exId);
+  const rough = o.est && o.est.reps > L.ROUGH_ABOVE;
+  const when = (d) => shortDate(d);
+  const rows = RECORD_REPS.filter((r) => o.rec[r] || o.est).map((r) => {
+    const rec = o.rec[r];
+    const lifted = rec ? `${L.fmtKg(rec.kg)} kg <small>× ${rec.reps}, ${when(rec.d)}${rec.how === 'tested' ? ', tested' : ''}</small>` : '–';
+    const est = o.est ? `≈${L.fmtKg(L.estFor(o.est.e, r))} kg` : '–';
+    return `<tr><th scope="row">${r}</th><td>${lifted}</td><td class="est">${est}</td></tr>`;
+  }).join('');
+  const testable = TEST_LIFTS.includes(o.exId);
+  return `
+  <header class="top"><button class="ghost" data-act="nav" data-to="prs">Back</button></header>
+  <h1 class="page">${esc(ex.name)}</h1>
+  ${o.gymId ? `<p class="lede">At ${esc(gymById(o.gymId).name)}. Machines and cables count per gym.</p>` : ''}
+  <dl class="stats two">
+    <div class="est"><dt>Estimated 1RM</dt><dd>${o.est ? `≈${L.fmtKg(o.est.e)}<small> kg</small>` : '–'}</dd>${o.est ? `<p class="from">From ${L.fmtKg(o.est.kg)} kg × ${o.est.reps}, ${when(o.est.d)}</p>` : ''}</div>
+    <div><dt>Heaviest lifted</dt><dd>${o.heaviest ? `${L.fmtKg(o.heaviest.kg)}<small> kg × ${o.heaviest.reps}</small>` : '–'}</dd>${o.heaviest ? `<p class="from">${when(o.heaviest.d)}</p>` : ''}</div>
+  </dl>
+  <p class="hint tested-line">${o.single ? `<b>Real 1RM ${L.fmtKg(o.single.kg)} kg</b>, ${o.single.how === 'tested' ? 'tested in a PR session' : 'a single you logged'} on ${when(o.single.d)}.` : `No real 1RM yet.${testable ? ' Test it in a PR session at the end of the block.' : ' A single you log counts as one.'}`}</p>
+  ${rough ? `<p class="hint">Rough estimate: it comes from a ${o.est.reps}-rep set. Sets of 2 to 10 reps give the best estimate.</p>` : ''}
+  ${o.n21 ? `<p class="hint">${o.n21} set${o.n21 === 1 ? '' : 's'} of 21s left out of these numbers, since half reps would skew them.</p>` : ''}
+  ${e1Chart(o.points, o.tested, ex.name)}
+  ${rows ? `<h2 class="sec">Rep records</h2>
+  <table class="rec">
+    <thead><tr><th scope="col">Reps</th><th scope="col">Lifted</th><th scope="col">Estimated</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <p class="hint">Lifted is the heaviest weight you've done for at least that many reps. Estimated comes from your best set with the Epley formula, the one Lyfta uses. Estimates are a guide; lifted numbers are the real thing.</p>` : ''}
+  ${tabs()}`;
+}
+
 function prsScreen() {
+  if (isReal()) return prsScreenReal();
   return `
   <header class="top">${brand()}</header>
   <h1 class="page">PRs and progress</h1>
@@ -807,6 +976,7 @@ function prsScreen() {
 
 function detailScreen() {
   const key = state.detail;
+  if (isReal()) return detailScreenReal(key);
   const ex = exOf(key);
   const b = state.bests[key];
   const ser = seriesFor(key);
@@ -1219,6 +1389,16 @@ function topTempos() {
 
 const sheetSet = () => { const sh = state.sheet; return state.session.blocks[sh.b].items[sh.i].sets[sh.s]; };
 
+// Switching a set to 21s (or back). Planned reps on a set she hasn't done yet follow along; logged reps stay as she typed them.
+function setStyle(it, set, style) {
+  const was = set.style || null;
+  set.style = style;
+  if (set.done || was === style) return;
+  const plain = it.rx?.reps ?? null;
+  if (style === '21s' && (set.reps == null || set.reps === plain)) set.reps = L.TWENTY_ONES;
+  else if (!style && set.reps === L.TWENTY_ONES && plain) set.reps = plain;
+}
+
 function setSheet(sh) {
   const b = state.session.blocks[sh.b];
   const it = b.items[sh.i];
@@ -1232,11 +1412,18 @@ function setSheet(sh) {
   const isSs = b.type === 'superset';
   const canRemove = !f && !set.done && (isSs ? b.rounds > 1 : it.sets.length > 1);
   const hasExtra = ex.track === 'kgReps' || ex.track === 'reps';
+  const has21 = ex.track === 'kgReps';
   const types = { warmup: 'Warm-up', working: 'Working', drop: 'Drop', failure: 'To failure' };
-  const titles = { tempo: 'Tempo', extra: 'Reps to failure', note: 'Note' };
-  const what = f === 'tempo' ? 'tempo' : f === 'extra' ? 'extra' : f ? null : 'both';
-  const copy = { tempo: 'Copy this tempo to every set', extra: 'Copy to every set', both: hasExtra ? 'Copy tempo and failure reps to every set' : 'Copy tempo to every set' };
+  const titles = { tempo: 'Tempo', extra: 'Reps to failure', note: 'Note', style: '21s' };
+  const what = f === 'tempo' || f === 'extra' || f === 'style' ? f : f ? null : 'both';
+  const bothList = ['tempo', hasExtra && 'failure reps', has21 && '21s'].filter(Boolean);
+  const copy = { tempo: 'Copy this tempo to every set', extra: 'Copy to every set', style: is21(set) ? 'Make every set 21s' : 'Make every set normal reps', both: `Copy ${bothList.length > 1 ? `${bothList.slice(0, -1).join(', ')} and ${bothList[bothList.length - 1]}` : bothList[0]} to every set` };
   const out = [`<h2>${f ? titles[f] : isSs ? `Round ${sh.s + 1}` : 'Set options'}</h2>`, `<p class="hint">${esc(ex.name)}</p>`];
+  if (show('style') && has21) {
+    out.push(`<p class="lbl">Reps</p>
+    <div class="chips"><button class="chip ${!is21(set) ? 'on' : ''}" aria-pressed="${!is21(set)}" data-act="so-style" data-v="">Normal</button><button class="chip ${is21(set) ? 'on' : ''}" aria-pressed="${is21(set)}" data-act="so-style" data-v="21s">21s</button></div>
+    <p class="hint">21s: bottom half, top half, then full reps. Log the total, so 21 for 7 + 7 + 7 or 18 for 6 + 6 + 6. They stay out of your 1RM and PRs.</p>`);
+  }
   if (show('tempo')) {
     out.push(`<p class="lbl">Tempo</p>
     <div class="chips"><button class="chip ${!set.tempo ? 'on' : ''}" data-act="so-tempo" data-v="">No tempo</button>${presets.map((p) => `<button class="chip ${set.tempo === p ? 'on' : ''}" aria-pressed="${set.tempo === p}" data-act="so-tempo" data-v="${esc(p)}">${esc(p)}</button>`).join('')}</div>
@@ -1412,7 +1599,7 @@ const round1 = (v) => Math.round(v * 10) / 10;
 
 function shortSet(x, track) {
   const extra = x.extra ? `+${x.extra}` : '';
-  if (track === 'kgReps') return `${L.fmtKg(x.kg)}×${x.reps ?? '–'}${extra}`;
+  if (track === 'kgReps') return `${L.fmtKg(x.kg)}×${x.reps ?? '–'}${extra}${is21(x) ? ' (21s)' : ''}`;
   if (track === 'reps') return `${x.reps ?? '–'}${extra}`;
   if (track === 'time') return `${x.time ?? '–'} s`;
   if (track === 'kgDistance') return `${L.fmtKg(x.kg)} kg ${x.dist ?? '–'} m`;
@@ -1447,9 +1634,11 @@ function coachMessage() {
     if (entries[entries.length - 1].h.startedAt < now - 84 * DAY) continue;
     const last = entries[entries.length - 1];
     const ex = exOf(last.it.exId);
-    const reps = last.it.rx?.reps || '';
+    const style = styleOf(last.work);
+    const plain = last.it.rx?.reps || '';
+    const reps = style === '21s' ? L.TWENTY_ONES : plain;
     const top = (e) => Math.max(0, ...e.work.map((x) => x.kg ?? 0));
-    const e1 = (e) => Math.max(0, ...e.work.map((x) => L.e1rm(x.kg, totalReps(x))));
+    const e1 = (e) => Math.max(0, ...e.work.map(setE1));
     const back = entries.filter((e) => e.h.startedAt <= last.h.startedAt - 28 * DAY).pop();
     let status = 'logged';
     let solid = '';
@@ -1462,9 +1651,9 @@ function coachMessage() {
     if (ex.track === 'kgReps' && top(last) > 0) {
       const kg = top(last);
       let same = 0;
-      for (let i = entries.length - 1; i >= 0 && top(entries[i]) === kg; i--) same += 1;
-      const n = Math.min(solidCount(key, reps), L.SOLID_SESSIONS);
-      const missed = (e) => !e.work.every((x) => totalReps(x) >= reps);
+      for (let i = entries.length - 1; i >= 0 && top(entries[i]) === kg && styleOf(entries[i].work) === style; i--) same += 1;
+      const n = Math.min(solidCount(key, reps, style), L.SOLID_SESSIONS);
+      const missed = (e) => !e.work.every((x) => totalReps(x) >= goalReps(x, plain));
       const misses = entries.slice(-same).slice(-6).filter(missed).length;
       atWeight = same;
       solid = reps ? `${n} of ${L.SOLID_SESSIONS}` : '';
@@ -1475,11 +1664,12 @@ function coachMessage() {
       else if (!missed(last)) status = 'building';
       else if (misses >= 3) status = 'stalled';
       else status = 'missed reps';
-      e1now = round1(e1(last));
-      if (back) { e1then = round1(e1(back)); change = e1then ? Math.round(((e1now - e1then) / e1then) * 100) : ''; }
+      // 21s and sets over 15 reps give no estimate, so those cells stay blank.
+      e1now = round1(e1(last)) || '';
+      if (back) { e1then = round1(e1(back)) || ''; change = e1then && e1now ? Math.round(((e1now - e1then) / e1then) * 100) : ''; }
       const b = entries.reduce((m, e) => (e1(e) > e1(m) ? e : m), entries[0]);
-      best = round1(e1(b));
-      bestDate = Sync.localDate(b.h.startedAt);
+      best = round1(e1(b)) || '';
+      bestDate = best ? Sync.localDate(b.h.startedAt) : '';
     } else if (ex.track === 'cardio') status = 'cardio';
     const notes = [];
     for (const e of entries.filter((x) => x.h.startedAt >= now - 28 * DAY)) {
@@ -1767,13 +1957,14 @@ function prsFor(h, list) {
     for (const it of itemsOf(x)) for (const set of it.sets) if (set.done && set.type !== 'warmup') applyBest(bests, it.key, set, exOf(it.exId).track);
   }
   for (const t of store.get('tested', [])) if (t.d < day) applyBest(bests, t.key, { kg: t.kg, reps: t.reps }, 'kgReps');
+  const known = new Set(Object.keys(bests).filter((k) => hasBest(bests[k])));
   const prs = [];
   for (const it of itemsOf(h)) {
     const ex = exOf(it.exId);
     for (const set of it.sets) {
       if (!set.done || set.type === 'warmup') continue;
       const hits = applyBest(bests, it.key, set, ex.track);
-      if (hits.length) prs.push({ key: it.key, exId: it.exId, name: ex.name, set: { kg: set.kg, reps: set.reps, extra: set.extra, time: set.time, dist: set.dist }, track: ex.track, hits });
+      if (hits.length && known.has(it.key)) prs.push({ key: it.key, exId: it.exId, name: ex.name, set: { kg: set.kg, reps: set.reps, extra: set.extra, time: set.time, dist: set.dist }, track: ex.track, hits });
     }
   }
   return prs;
@@ -1795,20 +1986,29 @@ function rebuildDerived(keys) {
         const track = exOf(it.exId).track;
         for (const set of it.sets) if (set.done && set.type !== 'warmup') applyBest(b, key, set, track);
         const work = workSets(it.sets);
-        if (work.length) last = work.map(({ kg, reps, extra, time, dist, cal }) => ({ kg, reps, extra, time, dist, cal }));
-        const top = Math.max(0, ...work.map((x) => L.e1rm(x.kg, totalReps(x))));
+        if (work.length) last = work.map(({ kg, reps, extra, time, dist, cal, style }) => ({ kg, reps, extra, time, dist, cal, style: style || null }));
+        const top = Math.max(0, ...work.map(setE1));
         if (top) points.push({ d: Sync.localDate(h.startedAt), e: top });
       }
     }
     for (const t of tested) if (t.key === key) applyBest(b, key, { kg: t.kg, reps: t.reps }, 'kgReps');
-    if (b[key]?.e1rm || b[key]?.time || b[key]?.heaviest) bests[key] = b[key]; else delete bests[key];
+    if (hasBest(b[key])) bests[key] = b[key]; else delete bests[key];
     if (points.length) series[key] = points; else delete series[key];
     if (last) lastMap[key] = last;
   }
   store.set('bests', bests);
   store.set('series', series);
   store.set('last', lastMap);
+  // History is the source now, so old PR entries for these lifts can't sneak back in.
+  store.set('prs', store.get('prs', []).filter((p) => !keys.has(p.key)));
   state.bests = loadBests();
+}
+
+// Once per formula change: work bests and graphs out again from the full history.
+function rebuildAll() {
+  const keys = new Set();
+  for (const h of histList()) keysOf(h).forEach((k) => keys.add(k));
+  if (keys.size) rebuildDerived(keys);
 }
 
 function mergeHistory(incoming) {
@@ -1985,8 +2185,9 @@ function onTick(row) {
   vibrate(40);
   if (state.histEdit) { renderScreen(); return; }
   if (set.type !== 'warmup') {
+    // The first session for a lift sets the baseline, so beating your own earlier set that day isn't a PR.
     const hits = applyBest(s.bests, item.key, set, ex.track);
-    if (hits.length) {
+    if (hits.length && (!s.known || s.known.includes(item.key))) {
       s.prs.push({ key: item.key, exId: item.exId, name: ex.name, set: { kg: set.kg, reps: set.reps, extra: set.extra, time: set.time, dist: set.dist }, track: ex.track, hits });
       celebrate(ex.name, setText(set, ex.track), hits);
     }
@@ -2043,8 +2244,8 @@ function saveSession() {
   for (const b of s.blocks) {
     for (const it of b.items || []) {
       const done = it.sets.filter((x) => x.done && (x.type === 'working' || x.type === 'failure'));
-      if (done.length) lastMap[it.key] = done.map(({ kg, reps, extra, time, dist, cal }) => ({ kg, reps, extra, time, dist, cal }));
-      const top = Math.max(0, ...done.map((x) => L.e1rm(x.kg, totalReps(x))));
+      if (done.length) lastMap[it.key] = done.map(({ kg, reps, extra, time, dist, cal, style }) => ({ kg, reps, extra, time, dist, cal, style: style || null }));
+      const top = Math.max(0, ...done.map(setE1));
       if (top) (series[it.key] ||= []).push({ d: date, e: top });
     }
   }
@@ -2262,13 +2463,16 @@ function onAction(el) {
     case 'so-tempo': { const sh = state.sheet; s.blocks[sh.b].items[sh.i].sets[sh.s].tempo = el.dataset.v || null; persist(); renderScreen(); renderSheet(); break; }
     case 'so-extra': { const sh = state.sheet; const set = s.blocks[sh.b].items[sh.i].sets[sh.s]; set.extra = Math.max(0, (set.extra || 0) + Number(el.dataset.d)); persist(); renderScreen(); renderSheet(); break; }
     case 'so-type': { const sh = state.sheet; s.blocks[sh.b].items[sh.i].sets[sh.s].type = el.dataset.v; persist(); renderScreen(); renderSheet(); break; }
+    case 'so-style': { const sh = state.sheet; const it = s.blocks[sh.b].items[sh.i]; setStyle(it, it.sets[sh.s], el.dataset.v || null); persist(); renderScreen(); renderSheet(); break; }
     case 'so-later': {
       const sh = state.sheet; const it = s.blocks[sh.b].items[sh.i]; const src = it.sets[sh.s]; const what = el.dataset.what || 'both';
+      const has21 = exOf(it.exId).track === 'kgReps';
       let n = 0;
       it.sets.forEach((x, k) => {
         if (k === sh.s || x.type === 'warmup' || x.type === 'drop') return;
-        if (what !== 'extra') x.tempo = src.tempo;
-        if (what !== 'tempo') x.extra = src.extra;
+        if (what === 'both' || what === 'tempo') x.tempo = src.tempo;
+        if (what === 'both' || what === 'extra') x.extra = src.extra;
+        if ((what === 'both' && has21) || what === 'style') setStyle(it, x, src.style || null);
         n += 1;
       });
       persist(); renderScreen(); toast(n ? `Copied to ${n} more set${n > 1 ? 's' : ''}` : 'No other sets to copy to'); break;
@@ -2317,7 +2521,7 @@ function onAction(el) {
     case 'flash-close': $('#flash').className = ''; break;
     case 'cel-close': $('#celebrate').className = ''; break;
     case 'detail':
-      if (!seriesFor(el.dataset.k).points.length) { toast('No numbers yet. Log a session first.'); break; }
+      if (!isReal() && !seriesFor(el.dataset.k).points.length) { toast('No numbers yet. Log a session first.'); break; }
       state.detail = el.dataset.k; state.screen = 'detail'; renderScreen(); break;
 
     // picker
@@ -2587,6 +2791,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------- boot ----------
+// 0.8 changed the 1RM rules (21s and sets over 15 reps left out, no PRs on a lift's first day), so work it all out again once.
+if (isReal() && store.get('derivedV', 0) < 2) { rebuildAll(); store.set('derivedV', 2); }
 if (state.session || state.test?.stage === 'run') keepAwake(true);
 renderScreen();
 renderRest();

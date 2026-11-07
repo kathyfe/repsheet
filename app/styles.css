@@ -323,6 +323,27 @@ figcaption { color: var(--dust); font-size: 14px; margin-top: 6px; }
 .l-reps { grid-area: reps; display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 8px; }
 .l-reps span { display: flex; flex-direction: column; font: 800 18px/1.1 var(--num); }
 .l-reps small { font: 400 11px var(--text); color: var(--dust); }
+.lift.real { grid-template-areas: 'name spark' 'nums spark'; }
+.l-name small { color: var(--dust); font-weight: 400; }
+.l-nums { grid-area: nums; display: flex; flex-wrap: wrap; gap: 2px 20px; align-items: baseline; margin-top: 4px; }
+.l-est, .l-act { display: flex; align-items: baseline; gap: 5px; }
+.l-est b, .l-act b { font: 800 30px/1 var(--num); }
+.l-est b { color: var(--dust); }
+.l-est small, .l-act small { color: var(--dust); font-size: 13px; }
+.l-est.none small { font-size: 14px; }
+.legend { color: var(--dust); font-size: 14px; margin: 4px 0 4px; }
+.legend b { color: var(--chalk); }
+.stats .est dd { color: var(--dust); }
+.stats .from { color: var(--dust); font-size: 12px; margin: 4px 0 0; }
+.tested-line { margin: 12px 0 4px; }
+.tested-line b { color: var(--chalk); }
+.chart-wait { margin: 16px 0; }
+table.rec { width: 100%; border-collapse: collapse; font-size: 15px; }
+table.rec th, table.rec td { text-align: left; padding: 8px 6px 8px 0; border-bottom: 1px solid var(--line); vertical-align: baseline; }
+table.rec thead th { font-size: 12px; color: var(--dust); font-weight: 600; }
+table.rec tbody th { font: 800 20px/1 var(--num); width: 3.2em; }
+table.rec td small { color: var(--dust); font-size: 13px; }
+table.rec td.est { color: var(--dust); white-space: nowrap; }
 .chart { margin: 0; }
 .grid { stroke: var(--line); stroke-width: 1; }
 .trend { fill: none; stroke: var(--chalk); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }

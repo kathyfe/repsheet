@@ -76,9 +76,26 @@ export function nudge(v, dir, steps, hint) {
   return vals[Math.min(vals.length - 1, Math.max(0, i + dir))];
 }
 
+// Estimated 1RM with the Epley formula, the one Lyfta uses by default.
+// Sets of 2 to 10 reps give the best estimate, above 12 it gets rough, and above 15 the app doesn't guess.
+export const ROUGH_ABOVE = 12;
+export const MAX_EST_REPS = 15;
 export function e1rm(kg, reps) {
-  if (!kg || !reps) return 0;
+  if (!kg || !reps || reps > MAX_EST_REPS) return 0;
   return reps <= 1 ? kg : Math.round(kg * (1 + reps / 30) * 10) / 10;
+}
+
+// What a 1RM suggests for a number of reps, to the nearest half kilo.
+export function estFor(e, reps) {
+  return e ? Math.round(fromE1rm(e, reps) * 2) / 2 : 0;
+}
+
+// 21s: a third from the bottom to halfway, a third from halfway up, then full reps. 21 = 7 + 7 + 7.
+export const TWENTY_ONES = 21;
+export function thirds(reps) {
+  if (!reps || reps % 3) return '';
+  const n = reps / 3;
+  return `${n} + ${n} + ${n}`;
 }
 
 export function fromE1rm(e, reps) {
