@@ -139,6 +139,13 @@ Status: draft for Kathy's review, 20 Oct 2026.
 - **Programme files** can now update a routine and bring past sessions into history. The first file still replaces the sample routines; later ones only touch the routines they name.
 - Rest of zero means no rest timer. PR session results now count towards bests.
 
+### Prototype 0.7 (7 Nov 2026)
+- **Coach summary.** After every save, edit or import, the app works out a short summary from its history and sends it with the programme mirror. The Google script writes it to two tabs at the front of the Sheet, so the Health Coach (any model) reads a short table instead of every set:
+  - **Progress:** one row per exercise trained in the last 12 weeks: last session, target reps, top weight, solid sessions (n of 4), status, sessions at this weight, estimated 1RM now and 4 weeks earlier, best, pace now and 4 weeks earlier for cardio, notes from the last 4 weeks.
+  - **Weeks:** one row per week for the last 26 weeks: sessions against the plan, workouts, minutes, feel, working sets, volume, PRs, sets per muscle group, cardio metres.
+- **Statuses:** new (one session), ready to go up (4 solid sessions in a row), building (every rep hit last time), missed reps, stalled (missed reps in 3 of the last 6 sessions at the same weight), cardio, logged.
+- "Send now" also resends the summary. The script needs redeploying once to write the new tabs; until then it ignores them.
+
 ## 4. Not in the MVP
 
 - Watch app, heart rate, Google Health sync (Google's API isn't open to new projects yet).
@@ -202,7 +209,7 @@ Sending a session again replaces its rows (matched on session_id), so retries ne
 ## 8. Milestones
 
 1. **Spec agreed.** This document.
-2. **Clickable prototype:** Today, Workout in progress, circuit timers, PR moments, PR board, graphs and PR session, with sample data. Live at https://kathyfe.github.io/repsheet/app/ (prototype 0.6, 6 Nov 2026). Kathy tries it in the gym.
+2. **Clickable prototype:** Today, Workout in progress, circuit timers, PR moments, PR board, graphs and PR session, with sample data. Live at https://kathyfe.github.io/repsheet/app/ (prototype 0.7, 7 Nov 2026). Kathy tries it in the gym.
 3. **MVP:** storage, builder, library, gyms, history, PRs, graphs, PR session, installable, Sheet sync.
 4. **Lyfta import and coach hook-up:** history in, Health Coach's weekly review skill reads the Sheet.
 5. **First functional block** built in the app and running.

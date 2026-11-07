@@ -13,10 +13,15 @@ const TABS = {
   Workouts: ['order', 'id', 'name', 'focus', 'about_minutes', 'summary', 'json'],
   Library: ['id', 'name', 'muscle_group', 'equipment', 'tracking', 'each_side'],
   Gyms: ['id', 'name', 'smallest_plate', 'dumbbells', 'kettlebells', 'stations_json', 'uses_json'],
+  Progress: ['exercise', 'gym', 'muscle_group', 'tracking', 'sessions_12w', 'last_date', 'last_session', 'target_reps', 'top_kg', 'solid', 'status', 'sessions_at_weight', 'e1rm_now', 'e1rm_4w_ago', 'change_4w_pct', 'best_e1rm', 'best_date', 'pace_now', 'pace_4w_ago', 'recent_notes', 'as_of'],
+  Weeks: ['week_start', 'sessions', 'planned', 'workouts', 'avg_minutes', 'longest_minutes', 'avg_feel', 'working_sets', 'volume_kg', 'prs', 'sets_by_group', 'cardio'],
 };
 
+// The coach's summary tabs sit at the front, so they're the first thing anyone reading the Sheet sees.
+const FRONT = ['Progress', 'Weeks'];
+
 // Sheets would read these as dates, times or sums, so they stay plain text.
-const TEXT_COLUMNS = ['date', 'tempo', 'start', 'end', 'dumbbells', 'kettlebells'];
+const TEXT_COLUMNS = ['date', 'tempo', 'start', 'end', 'dumbbells', 'kettlebells', 'week_start', 'last_date', 'best_date', 'as_of', 'pace_now', 'pace_4w_ago'];
 
 function doGet() {
   return reply({ ok: true, app: 'repsheet sync' });
@@ -39,6 +44,10 @@ function doPost(e) {
       overwrite('Library', m.programme.library);
       overwrite('Gyms', m.programme.gyms);
     }
+    if (m.coach) {
+      overwrite('Progress', m.coach.progress);
+      overwrite('Weeks', m.coach.weeks);
+    }
     return reply({ ok: true, sheet: SpreadsheetApp.getActiveSpreadsheet().getName() });
   } finally {
     lock.releaseLock();
@@ -60,6 +69,8 @@ function tab(name) {
   const head = TABS[name];
   sh.getRange(1, 1, 1, head.length).setValues([head]).setFontWeight('bold');
   sh.setFrozenRows(1);
+  const pos = FRONT.indexOf(name);
+  if (pos >= 0) { ss.setActiveSheet(sh); ss.moveActiveSheet(pos + 1); }
   return sh;
 }
 

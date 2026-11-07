@@ -4,7 +4,7 @@ import {
 import * as L from './logic.js';
 import * as Sync from './sync.js';
 
-const VERSION = 'prototype 0.6';
+const VERSION = 'prototype 0.7';
 
 // ---------- small helpers ----------
 const $ = (sel) => document.querySelector(sel);
@@ -1369,10 +1369,16 @@ async function flushSync() {
       if (!res.ok) throw new Error(res.error || 'refused');
       store.set('outbox', store.get('outbox', []).slice(1));
     }
-    if (store.get('syncDirty', false)) {
+    const prog = store.get('syncDirty', false);
+    const coach = store.get('coachDirty', false);
+    if (prog || coach) {
       store.del('syncDirty');
-      const res = await Sync.post(cfg, { programme: Sync.programmeMessage(db, syncHelpers()) }).catch(() => null);
-      if (!res?.ok) { store.set('syncDirty', true); throw new Error('refused'); }
+      store.del('coachDirty');
+      const msg = {};
+      if (prog) msg.programme = Sync.programmeMessage(db, syncHelpers());
+      if (coach) { const c = coachMessage(); if (c) msg.coach = c; }
+      const res = await Sync.post(cfg, msg).catch(() => null);
+      if (!res?.ok) { if (prog) store.set('syncDirty', true); if (coach) store.set('coachDirty', true); throw new Error('refused'); }
     }
     store.set('syncedAt', Date.now());
   } catch { /* everything stays queued for the next try */ }
@@ -1391,10 +1397,137 @@ async function connectSync() {
   if (!res?.ok) { toast(res?.error === 'key' ? "That key doesn't match the script" : "Couldn't reach the Sheet. Check the link and that the web app is deployed."); return; }
   store.set('sync', { url, key });
   store.set('syncDirty', true);
+  store.set('coachDirty', true);
   state.sheet = { kind: 'data' };
   renderSheet();
   toast(`Connected to ${res.sheet || 'your Sheet'}`);
   flushSync();
+}
+
+// ---------- the coach's summary: Progress and Weeks tabs in the Sheet ----------
+// The app does the counting, so the Health Coach (any model) reads a short table instead of every set.
+const DAY = 864e5;
+const mondayOf = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); };
+const round1 = (v) => Math.round(v * 10) / 10;
+
+function shortSet(x, track) {
+  const extra = x.extra ? `+${x.extra}` : '';
+  if (track === 'kgReps') return `${L.fmtKg(x.kg)}×${x.reps ?? '–'}${extra}`;
+  if (track === 'reps') return `${x.reps ?? '–'}${extra}`;
+  if (track === 'time') return `${x.time ?? '–'} s`;
+  if (track === 'kgDistance') return `${L.fmtKg(x.kg)} kg ${x.dist ?? '–'} m`;
+  if (track === 'cardio') return `${x.dist ?? '–'} m ${x.time ? L.fmtTime(x.time) : '–'}`;
+  if (track === 'distance') return `${x.dist ?? '–'} m`;
+  if (track === 'calories') return `${x.cal ?? '–'} cal`;
+  return '';
+}
+
+function paceOf(work, ex) {
+  const done = work.filter((x) => x.dist && x.time);
+  if (!done.length) return '';
+  return L.pace(done.reduce((a, x) => a + x.time, 0), done.reduce((a, x) => a + x.dist, 0), ex.split || 1000);
+}
+
+function coachMessage() {
+  const list = histList();
+  if (!list.length) return null;
+  const now = Date.now();
+  const asOf = Sync.localDate(list[list.length - 1].startedAt);
+  const byKey = new Map();
+  for (const h of list) {
+    for (const it of itemsOf(h)) {
+      const work = workSets(it.sets);
+      if (!work.length) continue;
+      if (!byKey.has(it.key)) byKey.set(it.key, []);
+      byKey.get(it.key).push({ h, it, work });
+    }
+  }
+  const progress = [];
+  for (const [key, entries] of byKey) {
+    if (entries[entries.length - 1].h.startedAt < now - 84 * DAY) continue;
+    const last = entries[entries.length - 1];
+    const ex = exOf(last.it.exId);
+    const reps = last.it.rx?.reps || '';
+    const top = (e) => Math.max(0, ...e.work.map((x) => x.kg ?? 0));
+    const e1 = (e) => Math.max(0, ...e.work.map((x) => L.e1rm(x.kg, totalReps(x))));
+    const back = entries.filter((e) => e.h.startedAt <= last.h.startedAt - 28 * DAY).pop();
+    let status = 'logged';
+    let solid = '';
+    let atWeight = '';
+    let e1now = '';
+    let e1then = '';
+    let change = '';
+    let best = '';
+    let bestDate = '';
+    if (ex.track === 'kgReps' && top(last) > 0) {
+      const kg = top(last);
+      let same = 0;
+      for (let i = entries.length - 1; i >= 0 && top(entries[i]) === kg; i--) same += 1;
+      const n = Math.min(solidCount(key, reps), L.SOLID_SESSIONS);
+      const missed = (e) => !e.work.every((x) => totalReps(x) >= reps);
+      const misses = entries.slice(-same).slice(-6).filter(missed).length;
+      atWeight = same;
+      solid = reps ? `${n} of ${L.SOLID_SESSIONS}` : '';
+      // ready: 4 solid in a row. building: hit every rep last time. stalled: missed reps in 3 of the last 6 sessions at this weight.
+      if (entries.length < 2) status = 'new';
+      else if (!reps) status = 'logged';
+      else if (n >= L.SOLID_SESSIONS) status = 'ready to go up';
+      else if (!missed(last)) status = 'building';
+      else if (misses >= 3) status = 'stalled';
+      else status = 'missed reps';
+      e1now = round1(e1(last));
+      if (back) { e1then = round1(e1(back)); change = e1then ? Math.round(((e1now - e1then) / e1then) * 100) : ''; }
+      const b = entries.reduce((m, e) => (e1(e) > e1(m) ? e : m), entries[0]);
+      best = round1(e1(b));
+      bestDate = Sync.localDate(b.h.startedAt);
+    } else if (ex.track === 'cardio') status = 'cardio';
+    const notes = [];
+    for (const e of entries.filter((x) => x.h.startedAt >= now - 28 * DAY)) {
+      const day = Sync.localDate(e.h.startedAt);
+      if ((e.it.note || '').trim()) notes.push(`${day}: ${e.it.note.trim()}`);
+      for (const x of e.it.sets) if (x.done && (x.note || '').trim()) notes.push(`${day}: ${x.note.trim()}`);
+    }
+    progress.push([
+      ex.name, key.includes('@') ? gymById(last.h.gymId).name : '', ex.group || '', ex.track, entries.filter((e) => e.h.startedAt >= now - 84 * DAY).length,
+      Sync.localDate(last.h.startedAt), last.work.map((x) => shortSet(x, ex.track)).join(', '), reps, ex.track === 'kgReps' ? top(last) || '' : '',
+      solid, status, atWeight, e1now, e1then, change, best, bestDate,
+      ex.track === 'cardio' ? paceOf(last.work, ex) : '', ex.track === 'cardio' && back ? paceOf(back.work, ex) : '',
+      notes.join(' | ').slice(0, 1000), asOf,
+    ]);
+  }
+  progress.sort((a, b) => (GROUPS.indexOf(a[2]) - GROUPS.indexOf(b[2])) || a[0].localeCompare(b[0]));
+  const weeks = new Map();
+  for (const h of list) {
+    const wk = mondayOf(h.startedAt);
+    if (!weeks.has(wk)) weeks.set(wk, { n: 0, names: [], mins: [], feels: [], sets: 0, vol: 0, prs: 0, groups: {}, cardio: {} });
+    const w = weeks.get(wk);
+    w.n += 1;
+    w.names.push(h.name);
+    w.mins.push(minsOf(h));
+    if (h.feel) w.feels.push(h.feel);
+    w.prs += (h.prs || []).length;
+    for (const it of itemsOf(h)) {
+      const ex = exOf(it.exId);
+      const work = workSets(it.sets);
+      w.sets += work.length;
+      if (work.length) w.groups[ex.group || 'Other'] = (w.groups[ex.group || 'Other'] || 0) + work.length;
+      if (ex.track === 'kgReps') w.vol += work.reduce((a, x) => a + (x.kg || 0) * totalReps(x), 0);
+      if (ex.track === 'cardio' || ex.track === 'distance') w.cardio[ex.name] = (w.cardio[ex.name] || 0) + work.reduce((a, x) => a + (x.dist || 0), 0);
+    }
+  }
+  const out = [];
+  const first = Math.max(mondayOf(list[0].startedAt), mondayOf(now) - 25 * 7 * DAY);
+  for (let wk = first; wk <= mondayOf(now); wk = mondayOf(wk + 8 * DAY)) {
+    const w = weeks.get(wk) || { n: 0, names: [], mins: [], feels: [], sets: 0, vol: 0, prs: 0, groups: {}, cardio: {} };
+    const avg = (a) => (a.length ? round1(a.reduce((x, y) => x + y, 0) / a.length) : '');
+    out.push([
+      Sync.localDate(wk), w.n, db.order.length, w.names.join(', '), avg(w.mins) === '' ? '' : Math.round(avg(w.mins)), w.mins.length ? Math.max(...w.mins) : '',
+      avg(w.feels), w.sets, Math.round(w.vol), w.prs,
+      GROUPS.filter((g) => w.groups[g]).map((g) => `${g} ${w.groups[g]}`).join(', '),
+      Object.entries(w.cardio).map(([n, m]) => `${n} ${m.toLocaleString('en-AU')} m`).join('; '),
+    ]);
+  }
+  return { progress, weeks: out };
 }
 
 // ---------- backups and programme files ----------
@@ -1693,6 +1826,7 @@ function mergeHistory(incoming) {
   setHistory(list);
   store.set('sessions', sums.sort((a, b) => a.startedAt - b.startedAt));
   rebuildDerived(keys);
+  store.set('coachDirty', true);
 }
 
 function saveHistoryEdit() {
@@ -1706,6 +1840,7 @@ function saveHistoryEdit() {
   list[i] = fresh;
   setHistory(list);
   rebuildDerived(new Set([...keysOf(before), ...keysOf(fresh)]));
+  store.set('coachDirty', true);
   const sums = store.get('sessions', []);
   const sum = sums.find((x) => x.startedAt === fresh.startedAt);
   if (sum) Object.assign(sum, { endedAt: fresh.endedAt, feel: fresh.feel, stats: sessionStats(fresh), prs: fresh.prs.length });
@@ -1920,6 +2055,7 @@ function saveSession() {
   store.set('tempos', tempos);
   const message = Sync.sessionMessage(s, syncHelpers());
   setHistory([...histList(), compact(s, message.id)]);
+  store.set('coachDirty', true);
   const dampers = store.get('dampers', {});
   for (const it of s.blocks.flatMap((b) => b.items || [])) if (it.damper != null) dampers[it.exId] = it.damper;
   store.set('dampers', dampers);
@@ -2054,7 +2190,7 @@ function onAction(el) {
     case 'data-load': loadDataFile(state.sheet); break;
     case 'sync-setup': state.sheet = { kind: 'sync' }; renderSheet(); break;
     case 'sync-connect': connectSync(); break;
-    case 'sync-now': flushSync(); toast('Sending'); break;
+    case 'sync-now': store.set('syncDirty', true); store.set('coachDirty', true); flushSync(); toast('Sending'); break;
     case 'sync-off': store.del('sync'); refreshSyncStatus(); toast('Disconnected. Sessions wait on this phone.'); break;
     case 'pick': state.pick = el.dataset.w; renderScreen(); break;
     case 'start': startWorkout(db.workouts[el.dataset.w], el.dataset.w); break;
@@ -2457,6 +2593,7 @@ renderRest();
 const notice = store.get('notice', null);
 if (notice) { store.del('notice'); toast(notice); }
 if (isReal()) navigator.storage?.persist?.()?.catch(() => { /* the browser decides */ });
+if (store.get('coachVersion', null) !== VERSION) { store.set('coachVersion', VERSION); if (histList().length) store.set('coachDirty', true); }
 window.addEventListener('online', flushSync);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') flushSync(); });
 flushSync();
